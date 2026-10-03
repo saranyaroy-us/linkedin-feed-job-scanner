@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Wrangler local state (local D1, queues) and generated runtime types
+.wrangler/
+worker-configuration.d.ts
+
+# Local secrets for `wrangler dev` — never commit
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+*.log
+logs/
+.DS_Store

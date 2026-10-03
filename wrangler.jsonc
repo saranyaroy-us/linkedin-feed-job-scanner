@@ -1,0 +1,52 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "linkedin-job-scanner",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+
+  // Non-secret configuration. Secrets (APIFY_TOKEN, APIFY_WEBHOOK_SECRET,
+  // DASHBOARD_USERNAME, DASHBOARD_PASSWORD) are set with `wrangler secret put`
+  // and, for local `wrangler dev`, in .env (git-ignored; copy .env.example).
+  "vars": {
+    // Time zone for dashboard times, date filters and "added today".
+    "DISPLAY_TIMEZONE": "Asia/Kolkata",
+    // Optional: the Apify Task id. When set, webhooks for runs of any other task are ignored.
+    // liLBnhHQdXrDUkcyJ = Apify Task "linkedin-job-signals".
+    "APIFY_TASK_ID": "liLBnhHQdXrDUkcyJ"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "linkedin-job-scanner",
+      // Id printed by `npx wrangler d1 create linkedin-job-scanner` (region APAC).
+      "database_id": "ab249a32-e684-4c49-b563-6b13fd1b682a",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Hourly: set raw_json = NULL on posts stored more than 7 days ago
+  // (src/maintenance/raw-json-retention.ts). Cron Triggers are part of Workers Free.
+  "triggers": { "crons": ["0 * * * *"] },
+
+  // The webhook queues the first 25-item dataset page and each full page queues
+  // the next; the consumer handles one page per invocation to stay inside the
+  // Free plan's 10 ms CPU limit. The code retries with its own backoff and marks
+  // a run failed after 5 attempts; max_retries is higher so that marking still
+  // happens when an invocation dies (retry_delay spaces those redeliveries).
+  "queues": {
+    "producers": [{ "binding": "INGEST_QUEUE", "queue": "linkedin-ingest-pages" }],
+    "consumers": [
+      {
+        "queue": "linkedin-ingest-pages",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 10,
+        "retry_delay": 30,
+        "max_concurrency": 2
+      }
+    ]
+  }
+}

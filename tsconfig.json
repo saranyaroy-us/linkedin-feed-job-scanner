@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    // Runtime types come from `npm run cf-typegen` (wrangler types). Worker
+    // bindings are typed explicitly in src/config/env.ts.
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types", "node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}
