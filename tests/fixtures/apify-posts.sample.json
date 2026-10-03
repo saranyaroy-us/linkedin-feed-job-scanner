@@ -1,0 +1,314 @@
+[
+  {
+    "type": "post",
+    "id": "7500000000000000101",
+    "linkedinUrl": "https://www.linkedin.com/posts/sample-author-one_no-time-to-train-activity-7500000000000000101-AbCd",
+    "content": "Replace \"role play\" with all of the boring, foundational ops work and this is a RevOps post that nails it.\n\n\"No time to pause and make sure we're aligned on lifecycle stages. We're behind.\"",
+    "contentAttributes": [],
+    "author": {
+      "id": "ACoAASAMPLEPROFILE0001",
+      "universalName": null,
+      "publicIdentifier": "sample-author-one",
+      "type": "profile",
+      "name": "Sample Author One",
+      "linkedinUrl": "https://www.linkedin.com/in/sample-author-one?miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAASAMPLEPROFILE0001",
+      "info": "RevOps as a Service | CEO @ Example Ops",
+      "website": "http://www.example.com",
+      "websiteLabel": "Visit my website",
+      "urn": "10000001",
+      "profileId": "ACoAASAMPLEPROFILE0001"
+    },
+    "postedAt": {
+      "timestamp": 1790958959771,
+      "date": "2026-10-02T16:35:59.771Z",
+      "postedAgoShort": "27m",
+      "postedAgoText": "27 minutes ago • Visible to anyone on or off LinkedIn"
+    },
+    "repostId": "7500000000000000102",
+    "header": { "text": null },
+    "entityId": "7500000000000000101",
+    "shareUrn": "urn:li:share:7500000000000000901",
+    "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:share:7500000000000000901",
+    "repost": {
+      "id": "7500000000000000102",
+      "linkedinUrl": "https://www.linkedin.com/posts/sample-author-two_no-time-to-train-activity-7500000000000000102-EfGh",
+      "content": "\"No time to train. We're behind.\" The sentence that keeps you behind.\n\nGetting behind isn't a reason to stop training. It's proof you need to.",
+      "contentAttributes": [],
+      "author": {
+        "id": "ACoAASAMPLEPROFILE0002",
+        "universalName": null,
+        "publicIdentifier": "sample-author-two",
+        "type": "profile",
+        "name": "Sample Author Two",
+        "linkedinUrl": "https://www.linkedin.com/in/sample-author-two?miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAASAMPLEPROFILE0002",
+        "info": "CRO @ Example Sales Co",
+        "website": null,
+        "websiteLabel": null,
+        "urn": "10000002",
+        "profileId": "ACoAASAMPLEPROFILE0002"
+      },
+      "postedAt": {
+        "timestamp": 1790948967896,
+        "date": "2026-10-02T13:49:27.896Z",
+        "postedAgoShort": "3h",
+        "postedAgoText": "3 hours ago • Visible to anyone on or off LinkedIn"
+      },
+      "postImages": [],
+      "comments": [],
+      "header": { "text": null },
+      "entityId": "7500000000000000102",
+      "shareUrn": "urn:li:share:7500000000000000902",
+      "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:share:7500000000000000902",
+      "engagement": {
+        "id": "7500000000000000102",
+        "likes": 34,
+        "comments": 21,
+        "shares": 1,
+        "reactions": [{ "type": "LIKE", "count": 26 }, { "type": "PRAISE", "count": 4 }]
+      }
+    },
+    "engagement": {
+      "id": "7500000000000000101",
+      "likes": 4,
+      "comments": 0,
+      "shares": 0,
+      "reactions": [{ "type": "LIKE", "count": 4 }]
+    },
+    "reactionIds": [],
+    "commentIds": [],
+    "query": { "sortBy": "date", "page": 1, "search": "\"Revenue Operations\" OR RevOps", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7500000000000000201",
+    "linkedinUrl": "https://www.linkedin.com/posts/example-data-co_databricks-genie-activity-7500000000000000201-IjKl",
+    "content": "Un tableau connecté en direct aux données gouvernées de l'entreprise.\n\nPour les équipes Finance, Sales, Operations et Marketing, la plateforme Data devient un environnement de travail quotidien.",
+    "contentAttributes": [
+      {
+        "start": 0,
+        "length": 10,
+        "type": "COMPANY_NAME",
+        "hyperlink": "https://www.linkedin.com/company/example-data-co/",
+        "textLink": null,
+        "company": {
+          "id": "20000001",
+          "name": "Example Data Co",
+          "linkedinUrl": "https://www.linkedin.com/company/example-data-co/"
+        }
+      }
+    ],
+    "author": {
+      "id": "20000001",
+      "universalName": "example-data-co",
+      "publicIdentifier": null,
+      "type": "company",
+      "name": "Example Data Co",
+      "linkedinUrl": "https://www.linkedin.com/company/example-data-co/posts",
+      "info": "179 followers",
+      "website": "https://example.com/",
+      "websiteLabel": "Visit website",
+      "urn": "20000001",
+      "companyId": "20000001"
+    },
+    "postedAt": {
+      "timestamp": 1790959346288,
+      "date": "2026-10-02T16:42:26.288Z",
+      "postedAgoShort": "20m",
+      "postedAgoText": "20 minutes ago • Visible to anyone on or off LinkedIn"
+    },
+    "header": { "text": null },
+    "entityId": "7500000000000000201",
+    "shareUrn": "urn:li:share:7500000000000000903",
+    "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:share:7500000000000000903",
+    "engagement": {
+      "id": "7500000000000000201",
+      "likes": 1,
+      "comments": 0,
+      "shares": 1,
+      "reactions": [{ "type": "LIKE", "count": 1 }]
+    },
+    "reactionIds": [],
+    "commentIds": [],
+    "query": { "sortBy": "date", "page": 1, "search": "\"Sales Operations\" OR \"Sales Ops\"", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7500000000000000301",
+    "linkedinUrl": "https://www.linkedin.com/posts/sample-author-three_product-marketing-manager-activity-7500000000000000301--MnO",
+    "content": "Acme Bio is Hiring!!\n\nMy department is looking for driven individuals for a number of commercial roles across CX, strategy, marketing, and commercial / sales operations. A few job postings listed below:\nProduct Marketing Manager: https://lnkd.in/example1\nAssociate, Sales Operations: https://lnkd.in/example2\nSr. Associate, Sales Operations: https://lnkd.in/example3\n\nIf you or anyone in your network is interested in learning more, please don't hesitate to reach out / apply!",
+    "contentAttributes": [],
+    "author": {
+      "id": "ACoAASAMPLEPROFILE0003",
+      "universalName": null,
+      "publicIdentifier": "sample-author-three",
+      "type": "profile",
+      "name": "Sample Author Three",
+      "linkedinUrl": "https://www.linkedin.com/in/sample-author-three?miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAASAMPLEPROFILE0003",
+      "info": "Senior Manager, Operations @ Acme Bio",
+      "website": null,
+      "websiteLabel": null,
+      "urn": "10000003",
+      "profileId": "ACoAASAMPLEPROFILE0003"
+    },
+    "postedAt": {
+      "timestamp": 1790959269962,
+      "date": "2026-10-02T16:41:09.962Z",
+      "postedAgoShort": "21m",
+      "postedAgoText": "21 minutes ago • Visible to anyone on or off LinkedIn"
+    },
+    "article": {
+      "title": "Product Marketing Manager",
+      "subtitle": "jobs.example.com",
+      "link": "https://jobs.example.com/acme-bio/product-marketing-manager",
+      "linkLabel": "Open article: Product Marketing Manager by jobs.example.com",
+      "description": null
+    },
+    "header": { "text": null },
+    "entityId": "7500000000000000301",
+    "shareUrn": "urn:li:share:7500000000000000904",
+    "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:share:7500000000000000904",
+    "engagement": {
+      "id": "7500000000000000301",
+      "likes": 1,
+      "comments": 0,
+      "shares": 0,
+      "reactions": [{ "type": "LIKE", "count": 1 }]
+    },
+    "reactionIds": [],
+    "commentIds": [],
+    "query": { "sortBy": "date", "page": 1, "search": "\"Sales Operations\" OR \"Sales Ops\"", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7500000000000000401",
+    "linkedinUrl": "https://www.linkedin.com/posts/sample-author-four_principal-system-app-admin-activity-7500000000000000401-PqRs",
+    "content": "Now Hiring! Principal System & App Admin needed to ensure all operational items such as RFCs, production support, problem resolution are completed across enterprise applications. Ideal candidate has technical app admin experience and stellar vendor management abilities. Apply at https://lnkd.in/example4",
+    "contentAttributes": [],
+    "author": {
+      "id": "ACoAASAMPLEPROFILE0004",
+      "universalName": null,
+      "publicIdentifier": "sample-author-four",
+      "type": "profile",
+      "name": "Sample Author Four",
+      "linkedinUrl": "https://www.linkedin.com/in/sample-author-four?miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAASAMPLEPROFILE0004",
+      "info": "Talent Acquisition Manager at Example College",
+      "website": null,
+      "websiteLabel": null,
+      "urn": "10000004",
+      "profileId": "ACoAASAMPLEPROFILE0004"
+    },
+    "postedAt": {
+      "timestamp": 1790959089280,
+      "date": "2026-10-02T16:38:09.280Z",
+      "postedAgoShort": "24m",
+      "postedAgoText": "24 minutes ago • Visible to anyone on or off LinkedIn"
+    },
+    "header": { "text": null },
+    "entityId": "7500000000000000401",
+    "shareUrn": "urn:li:ugcPost:7500000000000000905",
+    "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:ugcPost:7500000000000000905",
+    "engagement": {
+      "id": "7500000000000000905",
+      "likes": 2,
+      "comments": 0,
+      "shares": 1,
+      "reactions": [{ "type": "LIKE", "count": 2 }]
+    },
+    "reactionIds": [],
+    "commentIds": [],
+    "query": { "sortBy": "date", "page": 1, "search": "\"Vendor Manager\" OR \"Vendor Management\"", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7500000000000000501",
+    "linkedinUrl": "https://www.linkedin.com/posts/sample-author-five_we-are-hiring-facility-officer-activity-7500000000000000501-TuVw",
+    "content": "*WE ARE HIRING: FACILITY OFFICER*\n\n*Location:* Lagos\n*Employment Type:* Full-Time\n\nWe are seeking a proactive and experienced *Facility Officer* to oversee facility operations, maintenance, vendor management, asset management, and workplace safety.\n\nInterested and qualified candidates should apply using the email below:\n\n[email redacted]",
+    "contentAttributes": [],
+    "author": {
+      "id": "ACoAASAMPLEPROFILE0005",
+      "universalName": null,
+      "publicIdentifier": "sample-author-five",
+      "type": "profile",
+      "name": "Sample Author Five",
+      "linkedinUrl": "https://www.linkedin.com/in/sample-author-five?miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAASAMPLEPROFILE0005",
+      "info": "Senior HR Consultant",
+      "website": null,
+      "websiteLabel": null,
+      "urn": "10000005",
+      "profileId": "ACoAASAMPLEPROFILE0005"
+    },
+    "postedAt": {
+      "timestamp": 1790958879688,
+      "date": "2026-10-02T16:34:39.688Z",
+      "postedAgoShort": "28m",
+      "postedAgoText": "28 minutes ago • Visible to anyone on or off LinkedIn"
+    },
+    "header": { "text": null },
+    "entityId": "7500000000000000501",
+    "shareUrn": "urn:li:share:7500000000000000906",
+    "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:share:7500000000000000906",
+    "engagement": {
+      "id": "7500000000000000501",
+      "likes": 2,
+      "comments": 1,
+      "shares": 0,
+      "reactions": [{ "type": "LIKE", "count": 2 }]
+    },
+    "reactionIds": [],
+    "commentIds": [],
+    "query": { "sortBy": "date", "page": 1, "search": "\"Vendor Manager\" OR \"Vendor Management\"", "postedLimit": "week" }
+  },
+  {
+    "type": "post",
+    "id": "7500000000000000601",
+    "linkedinUrl": "https://www.linkedin.com/posts/sample-author-six_i-am-excited-to-share-activity-7500000000000000601-XyZa",
+    "content": "I am excited to share that I've started a new chapter as a Marketing and Sales Operations Coordinator at Example Data Co!\n\nHere's to a new chapter and continued growth.",
+    "contentAttributes": [
+      {
+        "start": 104,
+        "length": 15,
+        "type": "COMPANY_NAME",
+        "hyperlink": "https://www.linkedin.com/company/example-data-co/",
+        "textLink": null,
+        "company": {
+          "id": "20000001",
+          "name": "Example Data Co",
+          "linkedinUrl": "https://www.linkedin.com/company/example-data-co/"
+        }
+      }
+    ],
+    "author": {
+      "id": "ACoAASAMPLEPROFILE0006",
+      "universalName": null,
+      "publicIdentifier": "sample-author-six",
+      "type": "profile",
+      "name": "Sample Author Six",
+      "linkedinUrl": "https://www.linkedin.com/in/sample-author-six?miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAASAMPLEPROFILE0006",
+      "info": "Marketing and Sales Operations Coordinator at Example Data Co",
+      "website": null,
+      "websiteLabel": null,
+      "urn": "10000006",
+      "profileId": "ACoAASAMPLEPROFILE0006"
+    },
+    "postedAt": {
+      "timestamp": 1790959352996,
+      "date": "2026-10-02T16:42:32.996Z",
+      "postedAgoShort": "20m",
+      "postedAgoText": "20 minutes ago • Visible to anyone on or off LinkedIn"
+    },
+    "header": { "text": null },
+    "entityId": "7500000000000000601",
+    "shareUrn": "urn:li:share:7500000000000000907",
+    "shareLinkedinUrl": "https://www.linkedin.com/feed/update/urn:li:share:7500000000000000907",
+    "engagement": {
+      "id": "7500000000000000601",
+      "likes": 2,
+      "comments": 1,
+      "shares": 0,
+      "reactions": [{ "type": "PRAISE", "count": 1 }, { "type": "LIKE", "count": 1 }]
+    },
+    "reactionIds": [],
+    "commentIds": [],
+    "query": { "sortBy": "date", "page": 1, "search": "\"Sales Operations\" OR \"Sales Ops\"", "postedLimit": "week" }
+  }
+]
