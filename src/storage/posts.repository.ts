@@ -1,10 +1,14 @@
-import type { RawPost, StoredRawPost, StoredRawPostWithRaw } from '../domain/raw-post';
+import type { RawPost, StoredRawPost, StoredRawPostWithRaw, WorkMode } from '../domain/raw-post';
 import { endOfDayUtc, startOfDayUtc } from '../lib/time';
 
 /** Dashboard / API filters. `from` and `to` are YYYY-MM-DD in the display time zone. */
 export interface PostFilters {
   /** Exact search_query. */
   query?: string;
+  /** Case-insensitive substring of company_name. */
+  company?: string;
+  /** Exact work_mode (indexed). */
+  workMode?: WorkMode;
   /** Case-insensitive substring of author_name. */
   author?: string;
   authorType?: 'profile' | 'company';
@@ -47,6 +51,15 @@ const POST_COLUMNS = [
   'repost_id',
   'article_title',
   'article_url',
+  'job_title',
+  'company_name',
+  'company_linkedin_url',
+  'work_mode',
+  'linkedin_job_url',
+  'external_apply_url',
+  'job_location_text',
+  'job_country',
+  'location_source',
   'likes',
   'comments',
   'shares',
@@ -59,7 +72,7 @@ const READ_COLUMNS = ['id', ...POST_COLUMNS.filter((c) => c !== 'raw_json'), 'cr
 
 /**
  * Posts are inserted as one JSON array per statement, unpacked with json_each:
- * one bound parameter instead of 22 per row (D1 allows 100 per statement), and
+ * one bound parameter instead of one per column per row (D1 allows 100 per statement), and
  * one statement per chunk instead of one per row. A chunk stays well under
  * D1's 2 MB value limit. Only the (source, source_id) conflict is tolerated, so
  * a CHECK/NOT NULL violation still fails loudly instead of being skipped.
@@ -179,20 +192,30 @@ export class PostsRepository {
   }
 
   /**
-   * Newest first. Fetches limit + 1 rows to report `hasMore` without a COUNT(*)
-   * scan. Unfiltered and query-only views use indexes, so D1 rows-read stays
-   * close to the page size.
+   * US job posts, newest first. Fetches limit + 1 rows to report `hasMore`
+   * without a COUNT(*) scan. Unfiltered and query-only views use indexes, so
+   * D1 rows-read stays close to the page size.
+   * Only posts that passed the US-job filter (job_country 'US') are listed, so
+   * older or unclassified rows can never appear in the dashboard or the API.
    */
   async search(
     filters: PostFilters,
     options: SearchOptions,
   ): Promise<{ posts: (StoredRawPost & { raw_json?: string | null })[]; hasMore: boolean }> {
-    const where: string[] = [];
+    const where: string[] = ["job_country = 'US'"];
     const params: (string | number)[] = [];
 
     if (filters.query) {
       where.push('search_query = ?');
       params.push(filters.query);
+    }
+    if (filters.company) {
+      where.push(contains('company_name'));
+      params.push(filters.company);
+    }
+    if (filters.workMode) {
+      where.push('work_mode = ?');
+      params.push(filters.workMode);
     }
     if (filters.author) {
       where.push(contains('author_name'));
@@ -216,7 +239,7 @@ export class PostsRepository {
     }
 
     const columns = options.includeRawJson ? `${READ_COLUMNS}, raw_json` : READ_COLUMNS;
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = `WHERE ${where.join(' AND ')}`;
     const { results } = await this.db
       .prepare(
         `SELECT ${columns} FROM raw_posts ${whereSql}

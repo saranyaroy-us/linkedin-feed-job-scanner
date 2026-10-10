@@ -16,6 +16,14 @@ export interface PageRecord {
   offset: number;
   fetched: number;
   invalid: number;
+  /** Valid posts of a date-range search posted outside the range (fetched, not stored). */
+  outOfRange?: number;
+  /** Items dropped by the hard filter because their text lacks "hiring" (fetched, never stored). */
+  droppedNoHiring?: number;
+  /** Items dropped because the job is outside the US. */
+  droppedNonUs?: number;
+  /** Items dropped because the job's location is missing or ambiguous. */
+  droppedLocationUnknown?: number;
 }
 
 /** Maximum stored length of a failure reason. */
@@ -24,10 +32,21 @@ const MAX_ERROR_LENGTH = 300;
 const PAGES_SQL = 'FROM ingest_run_pages p WHERE p.ingest_run_id = ingest_runs.id';
 const FETCHED_SQL = `(SELECT COALESCE(SUM(p.fetched), 0) ${PAGES_SQL})`;
 const INVALID_SQL = `(SELECT COALESCE(SUM(p.invalid), 0) ${PAGES_SQL})`;
+const OUT_OF_RANGE_SQL = `(SELECT COALESCE(SUM(p.out_of_range), 0) ${PAGES_SQL})`;
+const NO_HIRING_SQL = `(SELECT COALESCE(SUM(p.dropped_no_hiring), 0) ${PAGES_SQL})`;
+const NON_US_SQL = `(SELECT COALESCE(SUM(p.dropped_non_us), 0) ${PAGES_SQL})`;
+const LOCATION_UNKNOWN_SQL = `(SELECT COALESCE(SUM(p.dropped_location_unknown), 0) ${PAGES_SQL})`;
 const INSERTED_SQL = '(SELECT COUNT(*) FROM raw_posts r WHERE r.apify_run_id = ingest_runs.apify_run_id)';
-/** Run totals from the recorded pages (index-backed subqueries). */
-const TOTALS_SQL = `fetched = ${FETCHED_SQL}, invalid = ${INVALID_SQL}, new = ${INSERTED_SQL},
-  already_seen = MAX(${FETCHED_SQL} - ${INVALID_SQL} - ${INSERTED_SQL}, 0)`;
+/**
+ * Run totals from the recorded pages (index-backed subqueries). Every fetched
+ * item lands in exactly one bucket: dropped (no "hiring", non-US, location
+ * unknown), invalid, out of range, new or — the rest — already seen.
+ */
+const TOTALS_SQL = `fetched = ${FETCHED_SQL}, invalid = ${INVALID_SQL}, out_of_range = ${OUT_OF_RANGE_SQL},
+  dropped_no_hiring = ${NO_HIRING_SQL}, dropped_non_us = ${NON_US_SQL},
+  dropped_location_unknown = ${LOCATION_UNKNOWN_SQL}, new = ${INSERTED_SQL},
+  already_seen = MAX(${FETCHED_SQL} - ${INVALID_SQL} - ${OUT_OF_RANGE_SQL} - ${NO_HIRING_SQL} - ${NON_US_SQL}
+    - ${LOCATION_UNKNOWN_SQL} - ${INSERTED_SQL}, 0)`;
 
 export class IngestRunsRepository {
   constructor(private readonly db: D1Database) {}
@@ -51,15 +70,16 @@ export class IngestRunsRepository {
   async claim(input: ClaimInput): Promise<IngestRun | null> {
     return this.db
       .prepare(
-        `INSERT INTO ingest_runs (started_at, apify_run_id, dataset_id, query_config_json, page_size, status)
-         VALUES (?1, ?2, ?3, ?4, ?6, 'processing')
+        `INSERT INTO ingest_runs (started_at, apify_run_id, dataset_id, query_config_json, page_size, status, screened)
+         VALUES (?1, ?2, ?3, ?4, ?6, 'processing', 1)
          ON CONFLICT (apify_run_id) DO UPDATE SET
            started_at = excluded.started_at,
            completed_at = NULL,
            dataset_id = excluded.dataset_id,
            query_config_json = excluded.query_config_json,
            status = 'processing',
-           error = NULL
+           error = NULL,
+           screened = 1
          WHERE ingest_runs.status = 'failed'
             OR (ingest_runs.status = 'processing' AND ingest_runs.started_at < ?5)
          RETURNING *`,
@@ -80,11 +100,21 @@ export class IngestRunsRepository {
   recordPageStatement(page: PageRecord): D1PreparedStatement {
     return this.db
       .prepare(
-        `INSERT INTO ingest_run_pages (ingest_run_id, page_offset, fetched, invalid)
-         VALUES (?, ?, ?, ?)
+        `INSERT INTO ingest_run_pages (ingest_run_id, page_offset, fetched, invalid, out_of_range, dropped_no_hiring,
+           dropped_non_us, dropped_location_unknown)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (ingest_run_id, page_offset) DO NOTHING`,
       )
-      .bind(page.ingestRunId, page.offset, page.fetched, page.invalid);
+      .bind(
+        page.ingestRunId,
+        page.offset,
+        page.fetched,
+        page.invalid,
+        page.outOfRange ?? 0,
+        page.droppedNoHiring ?? 0,
+        page.droppedNonUs ?? 0,
+        page.droppedLocationUnknown ?? 0,
+      );
   }
 
   /**
@@ -129,8 +159,11 @@ export class IngestRunsRepository {
       .run();
   }
 
-  async latest(): Promise<IngestRun | null> {
-    return this.db.prepare('SELECT * FROM ingest_runs ORDER BY started_at DESC, id DESC LIMIT 1').first<IngestRun>();
+  /** The newest run ingested through the hard filters; historical runs (screened NULL) are skipped. */
+  async latestScreened(): Promise<IngestRun | null> {
+    return this.db
+      .prepare('SELECT * FROM ingest_runs WHERE screened = 1 ORDER BY started_at DESC, id DESC LIMIT 1')
+      .first<IngestRun>();
   }
 
   async list(limit = 100): Promise<IngestRun[]> {

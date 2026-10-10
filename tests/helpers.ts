@@ -28,7 +28,14 @@ export function sampleItem(index: number): Record<string, unknown> {
   return item;
 }
 
-/** `count` distinct items cloned from the fixture with unique ids (for multi-page runs). */
+/** A structured job card (the Actor's `job` object) located in the US. */
+export const US_JOB = { title: 'Revenue Operations Manager', location: 'New York, NY' } as const;
+
+/**
+ * `count` distinct items cloned from the fixture with unique ids (for multi-page
+ * runs). Each mentions "hiring" (appended where the fixture text lacks it) and
+ * carries a US job card, so it passes both hard ingestion filters.
+ */
 export function manyItems(count: number, idPrefix = '76000000000'): Record<string, unknown>[] {
   const base = loadSampleItems();
   return Array.from({ length: count }, (_, i) => {
@@ -37,9 +44,35 @@ export function manyItems(count: number, idPrefix = '76000000000'): Record<strin
     item.id = id;
     item.entityId = id;
     item.linkedinUrl = `https://www.linkedin.com/posts/sample_activity-${id}-abcd`;
+    if (!/hiring/i.test(String(item.content ?? ''))) item.content = `${String(item.content ?? '')} #hiring`.trim();
+    item.job = { ...US_JOB };
     return item;
   });
 }
+
+/**
+ * Distinct fixture clones (unique ids) with exactly these post texts and no
+ * attached article. They keep the US job card unless `job` is null, so the
+ * post text alone decides the job location.
+ */
+export function itemsWithText(
+  texts: readonly string[],
+  idPrefix = '78000000000',
+  job: Record<string, unknown> | null = US_JOB,
+): Record<string, unknown>[] {
+  return manyItems(texts.length, idPrefix).map((item, i) => {
+    const { job: _job, article: _article, ...rest } = item;
+    return job ? { ...rest, content: texts[i], job: { ...job } } : { ...rest, content: texts[i] };
+  });
+}
+
+/**
+ * Normalized posts as the US-job filter stores them (job_country 'US'): the
+ * dashboard and /api/posts list only those. Tests that insert posts directly
+ * (bypassing ingestion) use this unless they need an unclassified row.
+ */
+export const asUsPosts = <T extends Record<string, unknown>>(posts: readonly T[]): T[] =>
+  posts.map((post) => ({ ...post, job_country: 'US', location_source: 'post_text' }));
 
 /** Clears all tables (D1 storage is shared between tests of one file). */
 export async function resetDb(db: D1Database = env.DB): Promise<void> {
@@ -48,6 +81,7 @@ export async function resetDb(db: D1Database = env.DB): Promise<void> {
     db.prepare('DELETE FROM ingest_runs'),
     db.prepare('DELETE FROM raw_posts'),
     db.prepare('DELETE FROM post_query_counts'),
+    db.prepare('DELETE FROM search_runs'),
   ]);
 }
 
@@ -67,6 +101,10 @@ export interface FakeApify {
   fetch: FetchLike;
   /** Request paths (with query) seen, in order. */
   calls: string[];
+  /** "METHOD path" of every request, in order. */
+  requests: string[];
+  /** Task runs started through POST /actor-tasks/{id}/runs, with the input override sent. */
+  startedRuns: { taskId: string; runId: string; input: unknown }[];
   /** Authorization header values seen. */
   authHeaders: (string | null)[];
   runs: Map<string, FakeRun>;
@@ -76,12 +114,21 @@ export interface FakeApify {
   breakNextBody: (pathPrefix: string) => void;
 }
 
-/** A fake of the Apify API endpoints the Worker uses (users/me, run, run INPUT, dataset items). */
+/** Task runs started across all fakes of a test file, so run ids stay unique like Apify's. */
+let startedRunCount = 0;
+
+/**
+ * A fake of the Apify API endpoints the Worker uses (users/me, run, run INPUT,
+ * dataset items, run task). A started task run is added to `runs` as READY with
+ * no items; a test sets its status and items before delivering its webhook.
+ */
 export function fakeApify(runs: FakeRun[] = [], userId = TEST_USER_ID): FakeApify {
   const byId = new Map(runs.map((r) => [r.id, r]));
   const failures: [string, number][] = [];
   const brokenBodies: string[] = [];
   const calls: string[] = [];
+  const requests: string[] = [];
+  const startedRuns: FakeApify['startedRuns'] = [];
   const authHeaders: (string | null)[] = [];
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -90,7 +137,9 @@ export function fakeApify(runs: FakeRun[] = [], userId = TEST_USER_ID): FakeApif
     const url = new URL(input);
     if (url.origin !== 'https://api.apify.com') throw new Error(`unexpected host ${url.host}`);
     const path = url.pathname.replace(/^\/v2/, '');
+    const method = init?.method ?? 'GET';
     calls.push(path + url.search);
+    requests.push(`${method} ${path}`);
     authHeaders.push(new Headers(init?.headers).get('Authorization'));
     const failure = failures.find(([prefix]) => path.startsWith(prefix));
     if (failure) return json({ error: { type: 'failure' } }, failure[1]);
@@ -109,7 +158,26 @@ export function fakeApify(runs: FakeRun[] = [], userId = TEST_USER_ID): FakeApif
 
     if (path === '/users/me') return json({ data: { id: userId } });
 
-    let m = path.match(/^\/actor-runs\/([^/]+)$/);
+    let m = path.match(/^\/actor-tasks\/([^/]+)\/runs$/);
+    if (m && method === 'POST') {
+      const taskId = m[1]!;
+      const runId = `RunStarted${String(++startedRunCount).padStart(7, '0')}`;
+      const input: unknown = JSON.parse(String(init?.body));
+      byId.set(runId, { id: runId, actorTaskId: taskId, status: 'READY', items: [], input });
+      startedRuns.push({ taskId, runId, input });
+      const data = {
+        id: runId,
+        userId,
+        actId: ACTOR_ID,
+        actorTaskId: taskId,
+        status: 'READY',
+        defaultDatasetId: `Ds${runId}`,
+        defaultKeyValueStoreId: `Kv${runId}`,
+      };
+      return json({ data }, 201);
+    }
+
+    m = path.match(/^\/actor-runs\/([^/]+)$/);
     if (m) {
       const run = byId.get(m[1]!);
       if (!run) return json({ error: { type: 'record-not-found' } }, 404);
@@ -149,6 +217,8 @@ export function fakeApify(runs: FakeRun[] = [], userId = TEST_USER_ID): FakeApif
   return {
     fetch,
     calls,
+    requests,
+    startedRuns,
     authHeaders,
     runs: byId,
     failWith: (prefix, status) => failures.push([prefix, status]),

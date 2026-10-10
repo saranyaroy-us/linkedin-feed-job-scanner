@@ -1,6 +1,7 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
 import { bodyLimit } from 'hono/body-limit';
+import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
 import type { FetchLike } from './apify/client';
 import type { IngestPageMessage } from './apify/types';
@@ -10,8 +11,13 @@ import { clearExpiredRawJson } from './maintenance/raw-json-retention';
 import { apiPostsHandler } from './routes/api-posts';
 import { dashboardHandler } from './routes/dashboard';
 import { healthHandler } from './routes/health';
+import { runSearchHandler } from './routes/run-search';
 import { runsHandler } from './routes/runs';
+import { RUN_SEARCH_SCRIPT_HASH } from './views/dashboard';
 import { apifyWebhookHandler, WEBHOOK_MAX_BYTES } from './webhook/apify-webhook';
+
+/** The Run Search form is three short fields. */
+const SEARCH_FORM_MAX_BYTES = 4 * 1024;
 
 export interface AppOptions {
   /** Outbound fetch for Apify API calls (injected in tests). */
@@ -39,10 +45,11 @@ export function createApp(options: AppOptions = {}) {
   app.use(
     '*',
     secureHeaders({
-      // Server-rendered HTML with one inline <style> and no scripts.
+      // Server-rendered HTML with one inline <style> and one inline script, allowed by its hash.
       contentSecurityPolicy: {
         defaultSrc: ["'none'"],
         styleSrc: ["'unsafe-inline'"],
+        scriptSrc: [`'sha256-${RUN_SEARCH_SCRIPT_HASH}'`],
         imgSrc: ["'self'"],
         formAction: ["'self'"],
         baseUri: ["'none'"],
@@ -60,7 +67,16 @@ export function createApp(options: AppOptions = {}) {
   );
 
   app.get('/', requireDashboardAuth, dashboardHandler(options));
-  app.get('/runs', requireDashboardAuth, runsHandler);
+  // Run Search. Browsers resend Basic credentials on cross-site requests too, so
+  // csrf() refuses form posts that do not come from this origin.
+  app.post(
+    '/search',
+    requireDashboardAuth,
+    csrf(),
+    bodyLimit({ maxSize: SEARCH_FORM_MAX_BYTES, onError: (c) => c.text('Payload too large', 413) }),
+    runSearchHandler(options),
+  );
+  app.get('/runs', requireDashboardAuth, runsHandler(options));
   app.get('/api/posts', requireDashboardAuth, apiPostsHandler(options));
 
   app.notFound((c) => c.json({ error: 'not found' }, 404));

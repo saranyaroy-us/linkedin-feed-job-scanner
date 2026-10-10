@@ -178,6 +178,20 @@ describe('IngestRunsRepository — pages and completion', () => {
     await runs.claim(claimInput('2026-10-03T03:31:00.000Z'));
     await runs.claim({ ...claimInput('2026-10-03T15:31:00.000Z'), apifyRunId: 'RunClaim000000002' });
     expect((await runs.list()).map((r) => r.apify_run_id)).toEqual(['RunClaim000000002', RUN]);
-    expect((await runs.latest())?.apify_run_id).toBe('RunClaim000000002');
+    expect((await runs.latestScreened())?.apify_run_id).toBe('RunClaim000000002');
+  });
+
+  it('marks claimed runs as screened; the latest screened run skips historical runs', async () => {
+    const run = (await runs.claim(claimInput('2026-10-03T03:31:00.000Z')))!;
+    expect(run.screened).toBe(1);
+    // A newer run ingested before the hard filters existed (screened NULL) is historical.
+    await runs.claim({ ...claimInput('2026-10-03T15:31:00.000Z'), apifyRunId: 'RunHistorical00001' });
+    await env.DB.prepare("UPDATE ingest_runs SET screened = NULL WHERE apify_run_id = 'RunHistorical00001'").run();
+    expect((await runs.latestScreened())?.apify_run_id).toBe(RUN);
+    await env.DB.prepare('UPDATE ingest_runs SET screened = NULL').run();
+    expect(await runs.latestScreened()).toBeNull();
+    // A restarted (previously failed) run is screened from then on.
+    await runs.markFailed(run.id, 'boom', '2026-10-03T03:32:00.000Z');
+    expect((await runs.claim(claimInput('2026-10-03T16:00:00.000Z')))?.screened).toBe(1);
   });
 });

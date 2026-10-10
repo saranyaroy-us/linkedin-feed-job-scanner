@@ -1,0 +1,9 @@
+{
+  "name": "legacy-reset-2026-10",
+  "description": "Posts stored by the four ingestion runs made before the hiring and US-job filters (2026-10-03 to 2026-10-05). Verified read-only against production on 2026-10-10.",
+  "runIds": ["m5ESGt9GpRKv6ffc0", "HWbClwaR815XHaa9E", "WbNQeDreOccOelkze", "EPZCmsouvh1MV4zRx"],
+  "posts": 1413,
+  "minPostId": 1,
+  "maxPostId": 1748,
+  "sourceIdsSha256": "7f54238249852ba63eff42a8249f19e7234aa0506d7b7f8b61c3be763935fb8c"
+}

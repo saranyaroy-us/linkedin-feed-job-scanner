@@ -31,7 +31,7 @@
   // (src/maintenance/raw-json-retention.ts). Cron Triggers are part of Workers Free.
   "triggers": { "crons": ["0 * * * *"] },
 
-  // The webhook queues the first 25-item dataset page and each full page queues
+  // The webhook queues the first 15-item dataset page and each full page queues
   // the next; the consumer handles one page per invocation to stay inside the
   // Free plan's 10 ms CPU limit. The code retries with its own backoff and marks
   // a run failed after 5 attempts; max_retries is higher so that marking still

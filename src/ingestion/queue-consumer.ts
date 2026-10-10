@@ -56,7 +56,8 @@ export async function handleIngestQueue(
       const run = result.finished;
       console.log(
         `queue: run ${page.apifyRunId} complete — fetched ${run.fetched}, new ${run.new}, ` +
-          `already seen ${run.already_seen}, invalid ${run.invalid}`,
+          `already seen ${run.already_seen}, invalid ${run.invalid}, out of range ${run.out_of_range}, ` +
+          `no hiring ${run.dropped_no_hiring}, non-US ${run.dropped_non_us}, location unknown ${run.dropped_location_unknown}`,
       );
     }
     message.ack();

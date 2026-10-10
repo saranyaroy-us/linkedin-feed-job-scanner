@@ -29,26 +29,45 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 export interface ApifyClient {
   /** Id of the user that owns the API token. */
   getCurrentUserId(): Promise<string>;
-  getRun(runId: string): Promise<ApifyRun>;
+  /** `timeoutMs` shortens the default request timeout (e.g. while rendering a page). */
+  getRun(runId: string, timeoutMs?: number): Promise<ApifyRun>;
   /** The INPUT record the run was started with, or null if absent/unreadable. */
   getRunInput(keyValueStoreId: string): Promise<unknown>;
   getDatasetItems(datasetId: string, offset: number, limit: number): Promise<unknown[]>;
+  /**
+   * Starts one run of an Actor Task, with `input` overriding the Task's input
+   * for that run only (the Task itself is not changed). Not retried: a retry
+   * could start a second run.
+   */
+  startTaskRun(taskId: string, input: unknown): Promise<ApifyRun>;
 }
 
 const DataEnvelope = <T extends z.ZodType>(schema: T) => z.object({ data: schema });
 
 export function createApifyClient(token: string, fetchImpl: FetchLike = (input, init) => fetch(input, init)): ApifyClient {
-  async function request(operation: string, path: string, allowNotFound = false): Promise<Response | null> {
+  /** GET, or POST with a JSON body when `options.json` is given. */
+  async function request(
+    operation: string,
+    path: string,
+    options: { allowNotFound?: boolean; json?: unknown; timeoutMs?: number } = {},
+  ): Promise<Response | null> {
+    const post = options.json !== undefined;
     let response: Response;
     try {
       response = await fetchImpl(`${APIFY_API_BASE}${path}`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        method: post ? 'POST' : 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          ...(post ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: post ? JSON.stringify(options.json) : undefined,
+        signal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
       });
     } catch {
       throw new ApifyApiError(`Apify ${operation} failed (network error or timeout)`, null);
     }
-    if (allowNotFound && response.status === 404) return null;
+    if (options.allowNotFound && response.status === 404) return null;
     if (!response.ok) throw new ApifyApiError(`Apify ${operation} failed (HTTP ${response.status})`, response.status);
     return response;
   }
@@ -75,14 +94,16 @@ export function createApifyClient(token: string, fetchImpl: FetchLike = (input, 
       return (await json('get current user', response!, DataEnvelope(ApifyUserSchema))).data.id;
     },
 
-    async getRun(runId) {
-      const response = await request('get run', `/actor-runs/${id(runId)}`);
+    async getRun(runId, timeoutMs) {
+      const response = await request('get run', `/actor-runs/${id(runId)}`, { timeoutMs });
       return (await json('get run', response!, DataEnvelope(ApifyRunSchema))).data;
     },
 
     async getRunInput(keyValueStoreId) {
       try {
-        const response = await request('get run input', `/key-value-stores/${id(keyValueStoreId)}/records/INPUT`, true);
+        const response = await request('get run input', `/key-value-stores/${id(keyValueStoreId)}/records/INPUT`, {
+          allowNotFound: true,
+        });
         return response ? await response.json() : null;
       } catch {
         // The input is informational only; ingestion must not depend on it.
@@ -94,6 +115,11 @@ export function createApifyClient(token: string, fetchImpl: FetchLike = (input, 
       const query = new URLSearchParams({ offset: String(offset), limit: String(limit), format: 'json' });
       const response = await request('get dataset items', `/datasets/${id(datasetId)}/items?${query}`);
       return json('get dataset items', response!, z.array(z.unknown()));
+    },
+
+    async startTaskRun(taskId, input) {
+      const response = await request('run task', `/actor-tasks/${id(taskId)}/runs`, { json: input });
+      return (await json('run task', response!, DataEnvelope(ApifyRunSchema))).data;
     },
   };
 }

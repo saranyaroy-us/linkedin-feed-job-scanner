@@ -1,0 +1,20 @@
+{
+  "searchQueries": [
+    "\"Revenue Operations\" AND \"hiring\"",
+    "\"Revenue Operation\" AND \"hiring\"",
+    "\"Sales Operations\" AND \"hiring\"",
+    "\"Sales Operation\" AND \"hiring\"",
+    "\"Sales Ops\" AND \"hiring\"",
+    "\"Vendor Manager\" AND \"hiring\"",
+    "\"Vendor Management\" AND \"hiring\""
+  ],
+  "maxPosts": 600,
+  "postedLimit": "24h",
+  "sortBy": "date",
+  "contentType": "all",
+  "profileScraperMode": "short",
+  "scrapeReactions": false,
+  "scrapeComments": false,
+  "postNestedReactions": false,
+  "postNestedComments": false
+}

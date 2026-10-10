@@ -6,7 +6,7 @@ import { clearExpiredRawJson } from '../../src/maintenance/raw-json-retention';
 import { normalizePosts } from '../../src/normalization/post-normalizer';
 import { PostsRepository } from '../../src/storage/posts.repository';
 import worker from '../../src/worker';
-import { CONTEXT, loadSampleItems, manyItems, resetDb, testEnv } from '../helpers';
+import { asUsPosts, CONTEXT, loadSampleItems, manyItems, resetDb, testEnv } from '../helpers';
 
 const DAY_MS = 24 * 60 * 60_000;
 const RETENTION_MS = RAW_JSON_RETENTION_DAYS * DAY_MS;
@@ -17,7 +17,7 @@ const storedAgo = (ms: number) => new Date(Date.parse(STORED_AT) + ms);
 /** Inserts items through the real repository, then backdates their created_at. */
 async function store(items: Record<string, unknown>[], createdAt: string) {
   const { posts } = await normalizePosts(items, CONTEXT);
-  await new PostsRepository(env.DB).insertMany(posts);
+  await new PostsRepository(env.DB).insertMany(asUsPosts(posts));
   await env.DB.prepare('UPDATE raw_posts SET created_at = ?1 WHERE source_id IN (SELECT value FROM json_each(?2))')
     .bind(createdAt, JSON.stringify(posts.map((p) => p.source_id)))
     .run();

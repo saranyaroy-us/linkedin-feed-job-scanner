@@ -27,7 +27,7 @@ export function toApiPost(post: StoredRawPost & { raw_json?: string | null }) {
 
 /**
  * GET /api/posts — read-only normalized posts. Same filters as the dashboard
- * (query, author, author_type, from, to, q) plus limit/offset.
+ * (query, company, work_mode, author, author_type, from, to, q) plus limit/offset.
  * raw_json is omitted unless include_raw=1.
  */
 export function apiPostsHandler(options: { now?: () => Date } = {}) {

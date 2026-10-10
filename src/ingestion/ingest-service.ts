@@ -2,16 +2,20 @@ import { ApifyApiError, type ApifyClient } from '../apify/client';
 import type { IngestPageMessage } from '../apify/types';
 import { ACTOR_ID } from '../config/search-config';
 import type { IngestRun } from '../domain/ingest-run';
-import { normalizePosts } from '../normalization/post-normalizer';
+import { isPostedWithin } from '../search/manual-search';
 import { IngestRunsRepository } from '../storage/ingest-runs.repository';
 import { PostsRepository } from '../storage/posts.repository';
+import { SearchRunsRepository } from '../storage/search-runs.repository';
+import { screenItems } from './screen-items';
 
 /**
  * Items per queue message. Each page is ingested in its own Worker invocation,
  * which keeps every invocation inside the Workers Free 10 ms CPU limit
- * (50-item pages measured 10–13 ms in production, 23 ms on a cold start).
+ * (50-item pages measured 10–13 ms in production, 23 ms on a cold start; with
+ * the hiring and US-job filters a cold 25-item page of hiring posts could
+ * exceed 10 ms, so pages hold 15 items).
  */
-export const PAGE_SIZE = 25;
+export const PAGE_SIZE = 15;
 
 /** A 'processing' run older than this may be restarted by a redelivered webhook. */
 export const STALE_RUN_MS = 30 * 60_000;
@@ -100,7 +104,9 @@ export interface PageResult {
 }
 
 /**
- * Queue consumer for one dataset page: fetch → normalize → insert (deduped) and
+ * Queue consumer for one dataset page: fetch → drop items whose text lacks
+ * "hiring" → drop jobs not confidently in the US → normalize → keep only posts
+ * inside the search's date range (date-range searches only) → insert (deduped) and
  * record the page — plus the run's page count if this is the last page — in one
  * D1 transaction; queue the next page if this one was full; complete the run
  * once every page is recorded. Safe to run more than once for the same message.
@@ -129,11 +135,27 @@ export async function ingestPage(message: IngestPageMessage, attempts: number, d
       if (fetched < message.limit) await deps.db.batch([runs.setPagesTotalStatement(run.id, pageNumber + 1)]);
     } else {
       const items = await deps.apify.getDatasetItems(message.datasetId, message.offset, message.limit);
-      const { posts, invalid } = await normalizePosts(items, { fetchedAt: nowIso(deps), apifyRunId: run.apify_run_id });
+      // Hard filters first ("hiring", then a US job location): dropped items leave
+      // here, before any normalization, dedupe or D1 work.
+      const screened = await screenItems(items, { fetchedAt: nowIso(deps), apifyRunId: run.apify_run_id });
+      // A date-range search keeps only posts posted inside its range: the
+      // Actor's cutoff bounds just the start, so newer, older and undated posts
+      // are dropped here and counted as out of range.
+      const range = run.apify_run_id ? await new SearchRunsRepository(deps.db).postedRange(run.apify_run_id) : null;
+      const kept = range ? screened.posts.filter((post) => isPostedWithin(post.posted_at, range)) : screened.posts;
       fetched = items.length;
       await deps.db.batch([
-        ...new PostsRepository(deps.db).insertStatements(posts),
-        runs.recordPageStatement({ ingestRunId: run.id, offset: message.offset, fetched, invalid: invalid.length }),
+        ...new PostsRepository(deps.db).insertStatements(kept),
+        runs.recordPageStatement({
+          ingestRunId: run.id,
+          offset: message.offset,
+          fetched,
+          invalid: screened.invalid,
+          outOfRange: screened.posts.length - kept.length,
+          droppedNoHiring: screened.droppedNoHiring,
+          droppedNonUs: screened.droppedNonUs,
+          droppedLocationUnknown: screened.droppedLocationUnknown,
+        }),
         ...(fetched < message.limit ? [runs.setPagesTotalStatement(run.id, pageNumber + 1)] : []),
       ]);
     }

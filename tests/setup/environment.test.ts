@@ -27,6 +27,8 @@ describe('test environment', () => {
         'trg_raw_posts_count_delete',
         'trg_raw_posts_count_insert',
         'idx_raw_posts_raw_json_pending', // 0002
+        'search_runs', // 0003
+        'idx_search_runs_started_at',
       ]),
     );
   });

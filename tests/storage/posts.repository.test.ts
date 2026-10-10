@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { RawPost } from '../../src/domain/raw-post';
 import { normalizePosts } from '../../src/normalization/post-normalizer';
 import { PostsRepository } from '../../src/storage/posts.repository';
-import { CONTEXT, loadSampleItems, resetDb } from '../helpers';
+import { asUsPosts, CONTEXT, loadSampleItems, resetDb } from '../helpers';
 
 const TZ = 'Asia/Kolkata';
 const page = { limit: 50, offset: 0, timeZone: TZ };
@@ -14,7 +14,7 @@ let posts: RawPost[];
 beforeEach(async () => {
   await resetDb();
   repo = new PostsRepository(env.DB);
-  posts = (await normalizePosts(loadSampleItems(), CONTEXT)).posts;
+  posts = asUsPosts((await normalizePosts(loadSampleItems(), CONTEXT)).posts);
 });
 
 describe('PostsRepository — D1 dedupe', () => {
@@ -102,6 +102,13 @@ describe('PostsRepository — dashboard queries', () => {
     expect(rows[0]).not.toHaveProperty('raw_json');
   });
 
+  it('lists only posts that passed the US-job filter (job_country US)', async () => {
+    await repo.insertMany([{ ...posts[0]!, source_id: 'li:legacy-1', job_country: null, location_source: null }]);
+    const { posts: rows } = await repo.search({}, page);
+    expect(rows.map((r) => r.source_id)).not.toContain('li:legacy-1');
+    expect(rows.every((r) => r.job_country === 'US')).toBe(true);
+  });
+
   it('includes raw_json only when asked', async () => {
     const { posts: rows } = await repo.search({}, { ...page, includeRawJson: true });
     expect(typeof rows[0]!.raw_json).toBe('string');
@@ -127,6 +134,23 @@ describe('PostsRepository — dashboard queries', () => {
     const long = 'department is looking for driven individuals for a number of commercial roles';
     expect((await repo.search({ text: long }, page)).posts).toHaveLength(1);
     expect((await repo.search({ text: '%' }, page)).posts).toHaveLength(0); // no wildcard semantics
+  });
+
+  it('filters by company (substring) and work mode, the latter through its index', async () => {
+    await repo.insertMany(posts);
+    await env.DB.prepare("UPDATE raw_posts SET work_mode = 'remote' WHERE source_id = 'li:7500000000000000401'").run();
+    const byCompany = (await repo.search({ company: 'data CO' }, page)).posts.map((p) => p.source_id).sort();
+    expect(byCompany).toEqual(['li:7500000000000000201', 'li:7500000000000000601']);
+    expect((await repo.search({ workMode: 'remote' }, page)).posts.map((p) => p.source_id)).toEqual(['li:7500000000000000401']);
+    expect((await repo.search({ workMode: 'hybrid' }, page)).posts).toEqual([]);
+    const plan = await env.DB.prepare(
+      'EXPLAIN QUERY PLAN SELECT id FROM raw_posts WHERE work_mode = ? ORDER BY posted_at DESC, id DESC LIMIT 51',
+    )
+      .bind('remote')
+      .all<{ detail: string }>();
+    const steps = plan.results.map((row) => row.detail).join(' | ');
+    expect(steps).toMatch(/USING (?:COVERING )?INDEX idx_raw_posts_work_mode \(work_mode=\?\)/);
+    expect(steps).not.toContain('TEMP B-TREE'); // newest first straight from the index
   });
 
   it('filters by date range in the display time zone', async () => {

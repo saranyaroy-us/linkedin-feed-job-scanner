@@ -1,4 +1,6 @@
 import { POST_SOURCE, RawPostSchema, type RawPost, type TaggedCompany } from '../domain/raw-post';
+import { jobCompany, jobTitle, workMode } from './job-details';
+import { externalApplyUrl, linkedinJobUrl } from './job-links';
 
 export interface NormalizeContext {
   fetchedAt: string;
@@ -133,6 +135,8 @@ export async function normalizePost(item: unknown, context: NormalizeContext): P
   const query = asObject(item.query);
   const repost = asObject(item.repost);
   const taggedCompanies = extractTaggedCompanies(item.contentAttributes);
+  const company = jobCompany(item);
+  const jobUrl = linkedinJobUrl(item);
 
   const candidate: RawPost = {
     source: POST_SOURCE,
@@ -156,6 +160,17 @@ export async function normalizePost(item: unknown, context: NormalizeContext): P
 
     article_title: asString(article?.title),
     article_url: asHttpUrl(article?.link),
+
+    job_title: jobTitle(item),
+    company_name: company.name,
+    company_linkedin_url: company.linkedinUrl,
+    work_mode: workMode(item),
+    linkedin_job_url: jobUrl,
+    external_apply_url: externalApplyUrl(item, jobUrl),
+    // Set by ingestion's US-job filter (src/ingestion/job-location.ts) for the posts it keeps.
+    job_location_text: null,
+    job_country: null,
+    location_source: null,
 
     likes: asCount(engagement?.likes),
     comments: asCount(engagement?.comments),
