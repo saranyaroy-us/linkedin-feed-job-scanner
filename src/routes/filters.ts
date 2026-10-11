@@ -1,4 +1,5 @@
 import * as z from 'zod';
+import { RELEVANCE_LABELS, type RelevanceView } from '../domain/classification';
 import { WORK_MODES } from '../domain/raw-post';
 import { dateInZone, isYmd } from '../lib/time';
 import type { PostFilters } from '../storage/posts.repository';
@@ -43,6 +44,20 @@ export function parseFilters(query: Record<string, string>): PostFilters {
   };
 }
 
+const RelevanceViewSchema = z.enum([...RELEVANCE_LABELS, 'all']).optional().catch(undefined);
+
+/**
+ * The `relevance` query parameter (an unknown value counts as absent). The
+ * dashboard falls back to "relevant", the API to "all".
+ */
+export function parseRelevanceView(value: string | undefined, fallback: RelevanceView): RelevanceView {
+  return RelevanceViewSchema.parse(value) ?? fallback;
+}
+
+/** Filters with the relevance view applied ("all" sets no relevance filter). */
+export const withRelevance = (filters: PostFilters, view: RelevanceView): PostFilters =>
+  view === 'all' ? filters : { ...filters, relevance: view };
+
 /** Parses an integer query parameter, falling back to `fallback` when absent or out of range. */
 export function parseIntParam(value: string | undefined, min: number, max: number, fallback: number): number {
   return int(min, max).parse(value) ?? fallback;
@@ -66,7 +81,7 @@ export function withSearchWindow(
   return { filters: { ...filters, from, fromIncludesUndated: true }, windowFrom: from };
 }
 
-/** True when no filter is set (exact totals are then known without scanning). */
+/** True when no filter other than relevance is set (exact totals are then known without scanning). */
 export const hasNoFilters = (f: PostFilters) =>
   !f.query && !f.company && !f.workMode && !f.author && !f.authorType && !f.from && !f.to && !f.text;
 

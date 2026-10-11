@@ -196,7 +196,7 @@ input[type=date] { padding-right: 8px; }
 
 /* Tables */
 .table-card { overflow: hidden; }
-.table-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 16px; padding: 12px 18px 10px; }
+.table-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 2px 16px; padding: 12px 18px 10px; }
 .table-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
 .results { margin: 0; color: var(--muted); font-size: 13px; }
 .note { display: flex; align-items: flex-start; gap: 8px; margin: 0 18px 10px; padding: 8px 12px; border-radius: var(--radius-sm);
@@ -256,6 +256,18 @@ a.action { display: inline-flex; align-items: center; gap: 4px; font-size: 13px;
 .badge.processing, .badge.running, .badge.starting { background: var(--primary-soft); color: var(--primary-ink); }
 .badge.failed { background: var(--red-soft); color: var(--red-ink); }
 .badge.historical { margin-top: 4px; background: #eef0f4; color: var(--muted); font-weight: 600; }
+td.job .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.badge.persona { background: var(--teal-soft); color: var(--teal-ink); font-weight: 600; }
+.badge.persona.revenue_operations { background: var(--primary-soft); color: var(--primary-ink); }
+.badge.persona.vendor_manager { background: var(--purple-soft); color: var(--purple-ink); }
+.badge.relevance.needs_review { background: var(--amber-soft); color: var(--amber-ink); font-weight: 600; }
+.badge.relevance.unrelated, .badge.relevance.not_a_job, .badge.relevance.unclassified { background: #eef0f4; color: var(--muted); }
+.view-tabs { display: inline-flex; gap: 2px; padding: 3px; margin-right: auto; background: var(--surface-2); border: 1px solid var(--border); border-radius: 11px; }
+.view-tabs a { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 8px;
+  color: var(--text-2); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.view-tabs a:hover { color: var(--text); background: #eef1f6; text-decoration: none; }
+.view-tabs a[aria-current="page"] { background: var(--surface); color: var(--primary-ink); box-shadow: 0 1px 3px rgba(16, 24, 40, .12); }
+.view-tabs .num { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
 table.runs tr.historical td { color: var(--muted); }
 
 /* Runs */

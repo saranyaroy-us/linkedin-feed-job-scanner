@@ -1,8 +1,10 @@
 import { ApifyApiError, type ApifyClient } from '../apify/client';
 import type { IngestPageMessage } from '../apify/types';
+import { classifyJobRelevance } from '../classification/job-relevance';
 import { ACTOR_ID } from '../config/search-config';
 import type { IngestRun } from '../domain/ingest-run';
 import { isPostedWithin } from '../search/manual-search';
+import { ClassificationsRepository } from '../storage/classifications.repository';
 import { IngestRunsRepository } from '../storage/ingest-runs.repository';
 import { PostsRepository } from '../storage/posts.repository';
 import { SearchRunsRepository } from '../storage/search-runs.repository';
@@ -144,8 +146,17 @@ export async function ingestPage(message: IngestPageMessage, attempts: number, d
       const range = run.apify_run_id ? await new SearchRunsRepository(deps.db).postedRange(run.apify_run_id) : null;
       const kept = range ? screened.posts.filter((post) => isPostedWithin(post.posted_at, range)) : screened.posts;
       fetched = items.length;
+      // Relevance labels for the posts this run stores, written in the same transaction (no extra round trip).
+      const classify = run.apify_run_id
+        ? new ClassificationsRepository(deps.db).insertForRunStatement(
+            kept.map((post) => ({ source_id: post.source_id, ...classifyJobRelevance(post) })),
+            run.apify_run_id,
+            nowIso(deps),
+          )
+        : null;
       await deps.db.batch([
         ...new PostsRepository(deps.db).insertStatements(kept),
+        ...(classify ? [classify] : []),
         runs.recordPageStatement({
           ingestRunId: run.id,
           offset: message.offset,

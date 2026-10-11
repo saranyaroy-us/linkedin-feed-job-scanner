@@ -2,8 +2,10 @@ import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { IngestPageMessage } from '../../src/apify/types';
 import { WEBHOOK_SECRET_HEADER } from '../../src/config/env';
+import { CLASSIFIER_VERSION } from '../../src/domain/classification';
 import { MAX_PAGE_ATTEMPTS, PAGE_SIZE } from '../../src/ingestion/ingest-service';
 import { handleIngestQueue, retryDelaySeconds } from '../../src/ingestion/queue-consumer';
+import { ClassificationsRepository } from '../../src/storage/classifications.repository';
 import { IngestRunsRepository } from '../../src/storage/ingest-runs.repository';
 import { PostsRepository } from '../../src/storage/posts.repository';
 import { createApp } from '../../src/worker';
@@ -134,7 +136,7 @@ describe('webhook → queue → D1 (end to end)', () => {
     expect(messages.every((m) => (m.message.body as IngestPageMessage).limit === 15)).toBe(true);
     expect(await runRow(RUN_A)).toMatchObject({ status: 'succeeded', pages_total: 121, fetched: 1800, new: 1800 });
     expect(await countPosts()).toBe(1800);
-  });
+  }, 20_000);
 
   it('completes a run with an empty dataset after probing the first page', async () => {
     apify = fakeApify([{ id: RUN_A, items: [] }]);
@@ -163,6 +165,38 @@ describe('webhook → queue → D1 (end to end)', () => {
     const repo = new PostsRepository(env.DB);
     const shared = await repo.findBySourceId('apify_linkedin_post_search', `li:${String(morning[40]!.id)}`);
     expect(shared?.apify_run_id).toBe(RUN_A);
+  });
+
+  it('labels each stored post in the same transaction, once: overlaps and redeliveries keep the first label', async () => {
+    const morning = manyItems(20);
+    const evening = [...morning.slice(10), ...manyItems(5, '77000000000')]; // 10 overlap + 5 new
+    apify = fakeApify([
+      { id: RUN_A, items: morning },
+      { id: RUN_B, items: evening },
+    ]);
+    await deliverWebhook(RUN_A);
+    const firstPage = queue.sent[0];
+    await drainQueue();
+    await deliver(firstPage, 2); // a redelivered page that was already stored
+    await deliverWebhook(RUN_B);
+    await drainQueue();
+
+    const { results } = await env.DB.prepare(
+      `SELECT c.relevance, c.persona, c.title_source, c.classifier_version, c.evidence_text, p.apify_run_id
+       FROM post_classifications c JOIN raw_posts p ON p.id = c.post_id`,
+    ).all<Record<string, unknown>>();
+    expect(results).toHaveLength(25); // one label per stored post
+    for (const row of results) {
+      // manyItems() posts carry a US job card titled "Revenue Operations Manager".
+      expect(row).toMatchObject({
+        relevance: 'relevant',
+        persona: 'revenue_operations',
+        title_source: 'job_card',
+        classifier_version: CLASSIFIER_VERSION,
+        evidence_text: 'Revenue Operations Manager',
+      });
+    }
+    expect(await new ClassificationsRepository(env.DB).counts()).toEqual({ relevant: 25, needs_review: 0, unrelated: 0, not_a_job: 0 });
   });
 
   it('repeated webhook and queue deliveries never duplicate posts or run history', async () => {

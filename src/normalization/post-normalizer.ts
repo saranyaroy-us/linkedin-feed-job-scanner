@@ -1,5 +1,5 @@
 import { POST_SOURCE, RawPostSchema, type RawPost, type TaggedCompany } from '../domain/raw-post';
-import { jobCompany, jobTitle, workMode } from './job-details';
+import { jobCompany, jobTitleWithSource, workMode } from './job-details';
 import { externalApplyUrl, linkedinJobUrl } from './job-links';
 
 export interface NormalizeContext {
@@ -136,6 +136,7 @@ export async function normalizePost(item: unknown, context: NormalizeContext): P
   const repost = asObject(item.repost);
   const taggedCompanies = extractTaggedCompanies(item.contentAttributes);
   const company = jobCompany(item);
+  const title = jobTitleWithSource(item);
   const jobUrl = linkedinJobUrl(item);
 
   const candidate: RawPost = {
@@ -161,7 +162,8 @@ export async function normalizePost(item: unknown, context: NormalizeContext): P
     article_title: asString(article?.title),
     article_url: asHttpUrl(article?.link),
 
-    job_title: jobTitle(item),
+    job_title: title.title,
+    job_title_source: title.source,
     company_name: company.name,
     company_linkedin_url: company.linkedinUrl,
     work_mode: workMode(item),

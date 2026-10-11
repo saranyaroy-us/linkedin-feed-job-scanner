@@ -41,6 +41,8 @@ export const RawPostSchema = z.object({
 
   /** Job details (src/normalization/job-details.ts); null when the post does not state them. */
   job_title: z.string().max(200).nullable(),
+  /** Where job_title came from; null without a title and for posts stored before migration 0008. */
+  job_title_source: z.enum(['job_card', 'listing', 'text']).nullable(),
   company_name: z.string().max(200).nullable(),
   /** The company's LinkedIn page, https://www.linkedin.com/company/<slug>/. */
   company_linkedin_url: z.url({ protocol: /^https$/ }).nullable(),

@@ -3,6 +3,7 @@ import type { FetchLike } from '../src/apify/client';
 import type { IngestPageMessage } from '../src/apify/types';
 import { ACTOR_ID } from '../src/config/search-config';
 import type { Env } from '../src/config/env';
+import type { Persona, Relevance } from '../src/domain/classification';
 import fixture from './fixtures/apify-posts.sample.json';
 
 export const FETCHED_AT = '2026-10-03T03:35:00.000Z';
@@ -74,11 +75,29 @@ export function itemsWithText(
 export const asUsPosts = <T extends Record<string, unknown>>(posts: readonly T[]): T[] =>
   posts.map((post) => ({ ...post, job_country: 'US', location_source: 'post_text' }));
 
+/**
+ * Labels every post that has no classification yet, so tests that insert posts
+ * directly can list them in the dashboard's default "Relevant" view.
+ */
+export async function labelPosts(relevance: Relevance = 'relevant', persona: Persona = 'sales_operations', db: D1Database = env.DB): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO post_classifications
+         (post_id, classifier_version, relevance, persona, hiring_intent, role_title, title_source, evidence_text, reason, classified_at)
+       SELECT id, 1, ?1, ?2, 'strong', job_title, NULL, job_title, 'Test label', '2026-10-03T03:35:00.000Z'
+       FROM raw_posts WHERE id NOT IN (SELECT post_id FROM post_classifications)`,
+    )
+    .bind(relevance, persona)
+    .run();
+}
+
 /** Clears all tables (D1 storage is shared between tests of one file). */
 export async function resetDb(db: D1Database = env.DB): Promise<void> {
   await db.batch([
     db.prepare('DELETE FROM ingest_run_pages'),
     db.prepare('DELETE FROM ingest_runs'),
+    db.prepare('DELETE FROM post_classifications'),
+    db.prepare('DELETE FROM relevance_counts'),
     db.prepare('DELETE FROM raw_posts'),
     db.prepare('DELETE FROM post_query_counts'),
     db.prepare('DELETE FROM search_runs'),

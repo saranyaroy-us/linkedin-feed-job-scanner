@@ -41,7 +41,8 @@ const ROLE_WORDS = new Set([
   'accountant', 'controller', 'intern', 'assistant', 'advisor', 'adviser', 'president', 'vp', 'svp', 'evp', 'avp',
   'principal', 'sdr', 'bdr', 'expert', 'agent', 'buyer', 'trainee', 'apprentice', 'operator', 'technician', 'auditor',
   'programmer', 'writer', 'editor', 'producer', 'marketer', 'cro', 'coo', 'cfo', 'ceo', 'cmo', 'cto', 'gm', 'liaison',
-  'merchandiser', 'estimator', 'clerk', 'secretary', 'counsel', 'attorney', 'paralegal', 'economist', 'trainer',
+  'merchandiser', 'estimator', 'clerk', 'secretary', 'counsel', 'attorney', 'paralegal', 'economist', 'trainer', 'pm',
+  'tpm',
 ]);
 /** "Head of Revenue Operations", "Director, Sales Operations", "VP of RevOps"… */
 const LEADING_ROLE =
@@ -55,9 +56,11 @@ const SENTENCE_WORDS = new Set([
   'apply', 'hiring',
 ]);
 const isRoleWord = (word: string) => ROLE_WORDS.has(word) || (word.endsWith('s') && ROLE_WORDS.has(word.slice(0, -1)));
+/** A title after an explicit label ("Position: Vertical Sales Strategy and Operations") may end in the function itself. */
+const FUNCTION_WORDS = new Set(['operations', 'ops', 'strategy', 'management', 'enablement', 'planning', 'procurement', 'sourcing']);
 
 /** One role: ends in a role word (before any ", …" or "(…)" detail and a level such as "II"), or starts with one. */
-function isJobTitle(title: string, minWords: number): boolean {
+function isJobTitle(title: string, minWords: number, labeled = false): boolean {
   if (title.length < 3 || title.length > 100 || /:\/\/|www\.|@/.test(title) || LISTING_WORDS.test(title)) return false;
   const words = title.split(' ');
   if (words.length < minWords || words.length > 12) return false;
@@ -67,7 +70,7 @@ function isJobTitle(title: string, minWords: number): boolean {
     .trim()
     .replace(/\s+(?:i{1,3}|iv|v|[1-5])$/i, '');
   const last = (head.split(' ').at(-1) ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+$/u, '');
-  return isRoleWord(last) || LEADING_ROLE.test(title);
+  return isRoleWord(last) || LEADING_ROLE.test(title) || (labeled && FUNCTION_WORDS.has(last));
 }
 
 /** Title (and employer) of a job listing's page title, e.g. "RevOps Analyst | Acme Careers", "… at Acme". */
@@ -88,58 +91,104 @@ function parseListingTitle(value: unknown): { title: string | null; company: str
   return { title, company: title ? clean(company) : null };
 }
 
+/** Stop words after which a title found in running text cannot continue. */
+const TITLE_STOP_WORDS = String.raw`\s(?:in|at|for|to|with|who|that|which|based|located|on|from|join|joining|needed|wanted|required|is|are|will|you|we|our|your|this|position|role|opportunity|job|opening|here|now|asap|today|apply)\b`;
+const TITLE_STOP_MARKS = String.raw`[,;:!?()[\]|•…*_"“”#@\p{Extended_Pictographic}\p{So}]|(?<!\b(?:sr|jr|mgr|st))\.(?:\s|$)`;
 /** Where a title may stop in running text (punctuation, emoji, a dash, a preposition or verb…). */
-const TITLE_END =
-  /\s*(?:[,;:!?()[\]|•…*_"“”#@\p{Extended_Pictographic}\p{So}]|(?<!\b(?:sr|jr|mgr|st))\.(?:\s|$)|\s[-–—]\s|[–—]|\s(?:in|at|for|to|with|who|that|which|based|located|on|from|join|joining|needed|wanted|required|is|are|will|you|we|our|your|this|position|role|opportunity|job|opening|here|now|asap|today)\b)/iu;
+const TITLE_END = new RegExp(String.raw`\s*(?:${TITLE_STOP_MARKS}|\s[-–—]\s|[–—]|${TITLE_STOP_WORDS})`, 'iu');
+/** After an explicit label a spaced dash may be part of the title ("Airframe Vendor Maintenance - Program Manager"). */
+const LABELED_TITLE_END = new RegExp(String.raw`\s*(?:${TITLE_STOP_MARKS}|[–—]|${TITLE_STOP_WORDS})`, 'iu');
 /** "and"/"or" end a lowercase title; in a capitalized one the run of capitals already stops there. */
 const LOWERCASE_TITLE_END = /\s(?:and|or)\b/i;
 const LEADING_FILLER =
   /^(?:(?:for|a|an|another|the|our|my|their|its|now|urgently|immediately|actively|currently|again|multiple|several|two|three|four|five|new|next|role of|position of|of)\b[\s:\-–—]*)+/i;
-/** "Role: …", "Job title - …", "Position: …" at the start of a line. */
-const LABELED_TITLE = /(?:^|[\n|•])[^\p{L}\n]*(?:job\s+title|position|role|title)\s*[*_]*\s*[:\-–—]\s*([^\n|•]+)/giu;
-/** "hiring", then the title on the same line ("We're hiring a …", "Hiring: …", "Now hiring! …"). */
-const HIRING_TITLE = /\bhiring\b[!:\-–—| \t*_]*([^\n]+)/giu;
+/** "Role: …", "Job title - …", "Position Title: …", "Job: …" at the start of a line (after any emoji). */
+const LABELED_TITLE =
+  /(?:^|[\n|•])[^\p{L}\n]*(?:job\s+title|position\s+title|position|role|title|job|opening|vacancy)\s*[*_]*\s*[:\-–—]\s*([^\n|•]+)/giu;
+/** Job-alert posts: "New FDE Job: <title> at <Company> — …". */
+const NEW_JOB = /\bnew\b[^\n:]{0,30}?\bjob\s*:\s*([^\n]+?)\s+at\s+([^\n—–|•·:()]+)/iu;
+/** "hiring", then the title on the same line ("We're hiring a …", "Hiring: …", "Now hiring! …", "#NOWHIRING: …"). */
+const HIRING_TITLE = /\b(?:now)?hiring\b[!:\-–—| \t*_]*([^\n]+)/giu;
+/** A header line that announces a job: "HIRING: …", "#NOWHIRING: …", "We're hiring! …". */
+const HIRING_HEADER = /hiring\s*[:!\-–—]/i;
 
 const cutAt = (text: string, end: RegExp) => {
   const index = text.search(end);
   return (index === -1 ? text : text.slice(0, index)).trim();
 };
+const CONNECTOR = /^(?:of|&|\/|-)$/;
 
 /**
  * A role title at the start of `text`: the run of capitalized words (after up
  * to three lowercase ones, as in "experienced HR Manager"), else the lowercase
- * phrase up to a stop word.
+ * phrase up to a stop word. Inside the run "and" joins two capitalized words
+ * only while the words before it are not yet a whole title ("Sales and
+ * Operations Trainee", but not "Sales Manager and Recruiter"). An explicitly
+ * labeled title may keep a spaced dash and end in the function itself.
  */
-function titleAt(text: string): string | null {
+function titleAt(text: string, labeled = false): string | null {
   const rest = text.replace(/^[\s*_]+/, '').replace(LEADING_FILLER, '');
   if (!rest || rest.startsWith('#')) return null;
-  const phrase = cutAt(rest, TITLE_END);
-  const words = phrase.split(/\s+/);
+  const phrases = labeled ? [cutAt(rest, LABELED_TITLE_END), cutAt(rest, TITLE_END)] : [cutAt(rest, TITLE_END)];
   const isCapital = (word: string) => /^[\p{Lu}\p{N}]/u.test(word);
-  const first = words.findIndex(isCapital);
-  const capitalized: string[] = [];
-  for (const word of first >= 0 && first <= 3 ? words.slice(first) : []) {
-    if (isCapital(word) || (capitalized.length > 0 && /^(?:of|&|\/|-)$/.test(word))) capitalized.push(word);
-    else break;
-  }
-  while (capitalized.length && /^(?:of|&|\/|-)$/.test(capitalized.at(-1)!)) capitalized.pop();
-  for (const candidate of [capitalized.join(' '), cutAt(phrase, LOWERCASE_TITLE_END)]) {
-    const title = candidate.replace(/[*_]+/g, '').trim();
-    const lower = title.toLowerCase().split(' ');
-    if (isJobTitle(title, 2) && !lower.some((word) => SENTENCE_WORDS.has(word))) return title;
+  for (const phrase of [...new Set(phrases)]) {
+    const words = phrase.split(/\s+/);
+    const first = words.findIndex(isCapital);
+    const capitalized: string[] = [];
+    const run = first >= 0 && first <= 3 ? words.slice(first) : [];
+    for (const [i, word] of run.entries()) {
+      const joinsAnd = word.toLowerCase() === 'and' && isCapital(run[i + 1] ?? '') && !isJobTitle(capitalized.join(' '), 1);
+      if (isCapital(word) || (capitalized.length > 0 && (CONNECTOR.test(word) || joinsAnd))) capitalized.push(word);
+      else break;
+    }
+    while (capitalized.length && (CONNECTOR.test(capitalized.at(-1)!) || capitalized.at(-1)!.toLowerCase() === 'and')) capitalized.pop();
+    for (const candidate of [capitalized.join(' '), cutAt(phrase, LOWERCASE_TITLE_END)]) {
+      const title = candidate.replace(/[*_]+/g, '').trim();
+      const lower = title.toLowerCase().split(' ');
+      if (isJobTitle(title, 2, labeled) && !lower.some((word) => SENTENCE_WORDS.has(word))) return title;
+    }
   }
   return null;
 }
 
+/** Post text as matched for job details: styled letters folded, "&amp;" artifacts of the source decoded. */
+const detailText = (content: string) => content.normalize('NFKC').replace(/&amp;/g, '&').replace(/(^|\s)amp;(?=\s)/g, '$1&');
+
+export interface TitleCandidate {
+  title: string;
+  /** "labeled": after "Position:", "Role:"…; "header": after "hiring". */
+  kind: 'labeled' | 'header';
+  /** Line of the post text it was found on (0-based). */
+  line: number;
+}
+
+/** Every role title stated in the post text, labeled ones first, without repeats. */
+export function titleCandidates(content: string): TitleCandidate[] {
+  const text = detailText(content);
+  const lineOf = (index: number) => text.slice(0, index).split('\n').length - 1;
+  const found: TitleCandidate[] = [];
+  const add = (raw: string, kind: TitleCandidate['kind'], index: number) => {
+    const title = titleAt(raw, kind === 'labeled');
+    if (title && !found.some((c) => c.title.toLowerCase() === title.toLowerCase())) found.push({ title, kind, line: lineOf(index) });
+  };
+  for (const match of text.matchAll(LABELED_TITLE)) add(match[1]!, 'labeled', match.index);
+  const alert = NEW_JOB.exec(text);
+  if (alert) add(alert[1]!, 'labeled', alert.index);
+  for (const match of text.matchAll(HIRING_TITLE)) add(match[1]!, 'header', match.index);
+  return found;
+}
+
+/**
+ * The post text's title, or null when there is none or when it is a digest of
+ * several jobs (two or more hiring headers naming different titles).
+ */
 function titleFromText(content: string): string | null {
-  const text = content.normalize('NFKC');
-  for (const pattern of [LABELED_TITLE, HIRING_TITLE]) {
-    for (const match of text.matchAll(pattern)) {
-      const title = titleAt(match[1]!);
-      if (title) return title;
-    }
-  }
-  return null;
+  const candidates = titleCandidates(content);
+  if (!candidates.length) return null;
+  const lines = detailText(content).split('\n');
+  const headerLines = new Set(candidates.filter((c) => c.kind === 'header' && HIRING_HEADER.test(lines[c.line] ?? '')).map((c) => c.line));
+  if (headerLines.size > 1) return null;
+  return candidates[0]!.title;
 }
 
 /** The attached article when it links to a job listing (on LinkedIn Jobs or elsewhere). */
@@ -148,12 +197,20 @@ function jobListing(item: Obj): Obj | null {
   return article && isJobListingUrl(article.link) ? article : null;
 }
 
-export function jobTitle(item: Obj): string | null {
+export type JobTitleSource = 'job_card' | 'listing' | 'text';
+
+/** The job title and where it came from: the job card, an attached job listing, or the post text. */
+export function jobTitleWithSource(item: Obj): { title: string | null; source: JobTitleSource | null } {
   const fromCard = clean(asObject(item.job)?.title);
-  if (fromCard) return fromCard;
+  if (fromCard) return { title: fromCard, source: 'job_card' };
   const fromListing = parseListingTitle(jobListing(item)?.title).title;
-  if (fromListing) return fromListing;
-  return typeof item.content === 'string' ? titleFromText(item.content) : null;
+  if (fromListing) return { title: fromListing, source: 'listing' };
+  const fromText = typeof item.content === 'string' ? titleFromText(item.content) : null;
+  return fromText ? { title: fromText, source: 'text' } : { title: null, source: null };
+}
+
+export function jobTitle(item: Obj): string | null {
+  return jobTitleWithSource(item).title;
 }
 
 /* ---------- Company ---------- */
@@ -198,6 +255,32 @@ function taggedCompanies(contentAttributes: unknown): { name: string; linkedinUr
 
 const NO_COMPANY: JobCompany = { name: null, linkedinUrl: null };
 
+/** "Company: …", "Employer: …", "Hiring company: …" at the start of a line (after any emoji). */
+const LABELED_COMPANY = /(?:^|[\n|•])[^\p{L}\n]*(?:hiring\s+company|company|employer|organi[sz]ation)\s*[*_]*\s*:\s*([^\n|•]+)/giu;
+const COMPANY_END = /\s*(?:[|•·;!?()[\]"“”#@\p{Extended_Pictographic}\p{So}]|\s[-–—]\s|[–—]|\s{2,})/u;
+/** Placeholders and descriptions that name no employer ("Confidential", "Well Reputed Organization", "IT Sector"). */
+const NOT_A_COMPANY = [
+  /^(?:confidential|undisclosed|stealth(?:\s+startup)?|n\/?a|tbd|tba|various|multiple|our\s+client|a\s+client|client)$/i,
+  /\b(?:reputed|reputable|leading|well[\s-]?known|renowned|prestigious|mnc|confidential|undisclosed)\b/i,
+  /^(?:[\p{L}&]+\s+)?(?:sector|industry|organi[sz]ation|company|firm|startup|client)$/iu,
+];
+
+/** The employer the post names explicitly: a "Company:" line or a job alert's "… Job: <title> at <Company>". */
+function namedEmployer(content: unknown): string | null {
+  if (typeof content !== 'string') return null;
+  const text = detailText(content);
+  const names = [...text.matchAll(LABELED_COMPANY)].map((m) => m[1]!);
+  const alert = NEW_JOB.exec(text);
+  if (alert) names.push(alert[2]!);
+  for (const raw of names) {
+    const name = clean(cutAt(raw.replace(/^[\s*_]+/, ''), COMPANY_END).replace(/[\s*_.,:]+$/, ''));
+    if (isEmployerName(name) && !NOT_A_COMPANY.some((re) => re.test(name)) && name.length <= 80 && name.split(' ').length <= 8) {
+      return name;
+    }
+  }
+  return null;
+}
+
 export function jobCompany(item: Obj): JobCompany {
   const tagged = taggedCompanies(item.contentAttributes);
   const author = asObject(item.author);
@@ -211,6 +294,9 @@ export function jobCompany(item: Obj): JobCompany {
 
   const fromCard = clean(asObject(item.job)?.subtitle)?.match(/^job by\s+(.+)$/i)?.[1];
   if (fromCard) return named(fromCard);
+  // An employer the text names outright beats tags and the poster (often a job-alert account or agency).
+  const explicit = namedEmployer(item.content);
+  if (explicit) return named(explicit);
   if (tagged.length === 1) return tagged[0]!;
   if (poster) return poster;
   const fromListing = parseListingTitle(jobListing(item)?.title).company;
@@ -238,17 +324,29 @@ function modeIn(text: string | null): Exclude<WorkMode, 'unknown'> | null {
   return null;
 }
 
+/** "Remote Option: Hybrid", "Work Mode: Onsite", "Work Arrangement: In-Office": the labeled value is the mode. */
+const LABELED_MODE =
+  /(?:^|[\n|•])[^\p{L}\n]*(?:remote\s+option|work\s*mode|work\s+model|work\s+arrangement|workplace(?:\s+type)?|work\s+setting|work\s+style)\s*[*_]*\s*[:\-–—]\s*([^\n|•]+)/giu;
+const MODE_VALUE_END = /\s*(?:[|•;()[\]"“”#\p{Extended_Pictographic}\p{So}]|\s[-–—]\s|[–—])/u;
+
+/** The one mode the labeled lines of a text state, or null (no label, or labels that disagree). */
+function labeledMode(content: unknown): Exclude<WorkMode, 'unknown'> | null {
+  if (typeof content !== 'string') return null;
+  const modes = new Set([...content.normalize('NFKC').matchAll(LABELED_MODE)].map((m) => modeIn(cutAt(m[1]!, MODE_VALUE_END))));
+  modes.delete(null);
+  return modes.size === 1 ? [...modes][0]! : null;
+}
+
 export function workMode(item: Obj): WorkMode {
   const card = asObject(item.job);
   const listing = jobListing(item);
   const sources = [
     card ? [card.title, card.location].map(clean).filter(Boolean).join('\n') : null,
     listing ? [listing.title, listing.subtitle, listing.description].map(clean).filter(Boolean).join('\n') : null,
-    clean(item.content),
   ];
   for (const source of sources) {
     const mode = modeIn(source);
     if (mode) return mode;
   }
-  return 'unknown';
+  return labeledMode(item.content) ?? modeIn(clean(item.content)) ?? 'unknown';
 }

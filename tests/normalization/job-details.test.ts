@@ -228,3 +228,87 @@ describe('normalizePost — job details', () => {
     });
   });
 });
+
+describe('job details — labeled fields, job alerts and digests', () => {
+  it('reads "Position Title:", "Job:" and emoji-prefixed labels, and stops a title before "Apply here"', () => {
+    expect(jobTitle(item('#hiring Sales and Operations Management Trainee Apply here: https://lnkd.in/x\nPosition Title: Sales and Operations Management Trainee'))).toBe(
+      'Sales and Operations Management Trainee',
+    );
+    expect(jobTitle(item('🚀 New role!\n💼 Position: Revenue Operations Analyst 🏢 Company: Acme Corp 📍 Austin, TX'))).toBe('Revenue Operations Analyst');
+    expect(jobTitle(item('Job: Vendor Manager\nLocation: Remote, US'))).toBe('Vendor Manager');
+  });
+
+  it('keeps "and" inside one title, but not between two complete roles', () => {
+    expect(jobTitle(item('Position: Vertical Sales Strategy and Operations'))).toBe('Vertical Sales Strategy and Operations');
+    expect(jobTitle(item('We are hiring a Sales Manager and Recruiter for our Austin office'))).toBe('Sales Manager');
+  });
+
+  it('keeps a spaced dash inside an explicitly labeled title', () => {
+    expect(jobTitle(item('Position: Airframe Vendor Maintenance - Program Manager\nCompany: Example Air'))).toBe(
+      'Airframe Vendor Maintenance - Program Manager',
+    );
+    // Unlabeled running text still stops at the dash.
+    expect(jobTitle(item('We are hiring a Program Manager - Austin, TX'))).toBe('Program Manager');
+  });
+
+  it('decodes "&amp;" artifacts of the source text', () => {
+    expect(jobTitle(item('🚨 NO H1B – HIRING: Technical Business Analyst / ITSM amp; Vendor Management Lead ❌ 🚨'))).toBe(
+      'Technical Business Analyst / ITSM & Vendor Management Lead',
+    );
+  });
+
+  it('reads job alerts: "New … Job: <title> at <Company>"', () => {
+    const alert = item('New FDE Job: Vertical Sales Strategy and Operations at ElevenLabs — United States: details follow', {
+      author: { ...(sampleItem(3).author as object), type: 'company', name: 'FDE Engineers', linkedinUrl: 'https://www.linkedin.com/company/fde-engineers/' },
+    });
+    expect(jobTitle(alert)).toBe('Vertical Sales Strategy and Operations');
+    // The employer the alert names beats the alert account that posted it.
+    expect(jobCompany(alert)).toEqual({ name: 'ElevenLabs', linkedinUrl: null });
+  });
+
+  it('leaves the title empty for a digest of several jobs (two or more hiring headers)', () => {
+    const digest = item('#NOWHIRING: Business Ops & Strategy PM\nDetails…\n---\nHIRING: Founding GTM Engineer\nDetails…\n---\nHIRING: Founding Product Engineer');
+    expect(jobTitle(digest)).toBeNull();
+    // One header plus its own labeled title is not a digest.
+    expect(jobTitle(item('HIRING: Revenue Operations Manager\nRole: Revenue Operations Manager'))).toBe('Revenue Operations Manager');
+  });
+
+  it('takes the employer from "Company:" / "Employer:" lines before tags and the posting company', () => {
+    const agencyPost = item('Defense Unicorns is hiring!\n💼 Role: Mission Associate\n🏢 Company: Defense Unicorns\n📍 Location: Remote', {
+      author: { ...(sampleItem(3).author as object), type: 'company', name: 'Chakrie', linkedinUrl: 'https://www.linkedin.com/company/chakrie/' },
+    });
+    expect(jobCompany(agencyPost)).toEqual({ name: 'Defense Unicorns', linkedinUrl: null });
+    expect(jobCompany(item('Hiring!\n🏢 Employer: Cincinnatus LLC 🤖 Opportunity shared via a marketplace'))).toEqual({ name: 'Cincinnatus LLC', linkedinUrl: null });
+    // A labeled name keeps the LinkedIn page of a tagged company with that exact name.
+    expect(jobCompany(item('Company: Acme Corp', { contentAttributes: [companyTag('Acme Corp', 'acme-corp')] }))).toEqual({
+      name: 'Acme Corp',
+      linkedinUrl: 'https://www.linkedin.com/company/acme-corp/',
+    });
+  });
+
+  it('never stores placeholders, descriptions or markdown as the employer', () => {
+    for (const label of ['Confidential', 'Well Reputed Organization', 'IT Sector', 'Leading Fintech Company', 'Our Client', 'Dallas Jobs']) {
+      expect(jobCompany(item(`Hiring a Sales Ops Analyst\nCompany: ${label}`)).name).toBeNull();
+    }
+    expect(jobCompany(item('Company: **HDB Financial Services Ltd**')).name).toBe('HDB Financial Services Ltd');
+  });
+
+  it('reads the work mode from labeled lines, even when the label itself says "Remote"', () => {
+    expect(workMode(item('Position: Program Manager\n📍Remote Option: Hybrid\n#Hybrid'))).toBe('hybrid');
+    expect(workMode(item('Work Mode: Onsite – Mossville, IL'))).toBe('onsite');
+    expect(workMode(item('Work Arrangement: In-Office'))).toBe('onsite');
+    // Labels that disagree say nothing; the rest of the text is then read as before.
+    expect(workMode(item('Work Mode: Remote\nWorkplace type: Hybrid'))).toBe('unknown');
+  });
+
+  it('records where the title came from', async () => {
+    const fromCard = await normalizePost(item('We are hiring', { job: jobCard() }), CONTEXT);
+    expect([fromCard.job_title, fromCard.job_title_source]).toEqual(['Director, Revenue Operations', 'job_card']);
+    const fromListing = await normalizePost(item('Apply below', { article: listing('Sales Operations Analyst | Acme Careers') }), CONTEXT);
+    expect([fromListing.job_title, fromListing.job_title_source]).toEqual(['Sales Operations Analyst', 'listing']);
+    const fromText = await normalizePost(item("We're hiring a Vendor Manager to run our supplier programs"), CONTEXT);
+    expect([fromText.job_title, fromText.job_title_source]).toEqual(['Vendor Manager', 'text']);
+    const none = await normalizePost(item('Great article about operations'), CONTEXT);
+    expect([none.job_title, none.job_title_source]).toEqual([null, null]);
+  });
+});

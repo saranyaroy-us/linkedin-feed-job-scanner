@@ -7,7 +7,7 @@ import { normalizePosts } from '../../src/normalization/post-normalizer';
 import { IngestRunsRepository } from '../../src/storage/ingest-runs.repository';
 import { PostsRepository } from '../../src/storage/posts.repository';
 import { createApp } from '../../src/worker';
-import { asUsPosts, basicAuthHeader, CONTEXT, executionCtx, loadSampleItems, manyItems, resetDb, testEnv } from '../helpers';
+import { asUsPosts, basicAuthHeader, CONTEXT, executionCtx, labelPosts, loadSampleItems, manyItems, resetDb, testEnv } from '../helpers';
 
 // 2026-10-03 09:05 IST: "today" in Asia/Kolkata starts at 2026-10-02T18:30Z.
 const NOW = new Date('2026-10-03T03:35:00.000Z');
@@ -26,6 +26,7 @@ beforeEach(async () => {
   await resetDb();
   const { posts } = await normalizePosts(loadSampleItems(), CONTEXT);
   await new PostsRepository(env.DB).insertMany(asUsPosts(posts));
+  await labelPosts(); // listed in the default Relevant view
   // created_at chosen so "today" differs between IST (starts 2026-10-02T18:30Z) and UTC (starts 2026-10-03T00:00Z):
   // today in IST: 101, 201, 401, 501 → 4;  today in UTC: 101, 401, 501 → 3.
   const createdAt: Record<string, string> = {
@@ -129,7 +130,9 @@ describe('GET / (dashboard)', () => {
 
   it('applies filters (query, author, author type, dates, text)', async () => {
     const byQuery = await (await get(`/?query=${encodeURIComponent(SALES)}`)).text();
-    expect(byQuery).toContain('Showing 1–3 of 3 posts');
+    expect(byQuery).toContain('Showing 1–3 posts'); // per-query totals are counted per query, not per label …
+    // … so the exact total is shown in the All view.
+    expect(await (await get(`/?relevance=all&query=${encodeURIComponent(SALES)}`)).text()).toContain('Showing 1–3 of 3 posts');
     const combined = await (await get(`/?query=${encodeURIComponent(SALES)}&q=chapter`)).text();
     expect(combined).toContain('Showing 1–1 posts');
     expect(combined).toContain('Sample Author Six');
@@ -212,20 +215,21 @@ describe('GET / — dashboard queries, KPI cards and filter toolbar', () => {
     // … but they stay in D1, in the totals and in the posts table.
     expect(body).toMatch(/Stored posts<\/div><div class="value">6</);
     expect(body).toContain('Showing 1–6 of 6 posts');
-    expect(await (await get(`/?query=${encodeURIComponent(SALES)}`)).text()).toContain('Showing 1–3 of 3 posts');
+    expect(await (await get(`/?relevance=all&query=${encodeURIComponent(SALES)}`)).text()).toContain('Showing 1–3 of 3 posts');
   });
 
   it('counts and filters posts stored under a dashboard query', async () => {
     const items = manyItems(2, '79000000000').map((item) => ({ ...item, query: { ...(item.query as object), search: SALES_OPS_HIRING } }));
     const { posts } = await normalizePosts(items, CONTEXT);
     await new PostsRepository(env.DB).insertMany(asUsPosts(posts));
+    await labelPosts();
 
     const body = await (await get('/')).text();
     expect(cardRows(body)).toEqual(SEARCH_QUERIES.map((query) => [escaped(query), query === SALES_OPS_HIRING ? 2 : 0]));
     expect(section(body, '<ul class="qlist">', '</ul>')).toContain('style="width: 100%"');
     expect(body).toMatch(/Stored posts<\/div><div class="value">8</);
 
-    const filtered = await (await get(`/?query=${encodeURIComponent(SALES_OPS_HIRING)}`)).text();
+    const filtered = await (await get(`/?relevance=all&query=${encodeURIComponent(SALES_OPS_HIRING)}`)).text();
     expect(filtered).toContain('Showing 1–2 of 2 posts');
     expect(filtered).toContain(`<option value="${escaped(SALES_OPS_HIRING)}" selected>`);
   });
@@ -357,9 +361,11 @@ describe('GET / — posts table: job, company, location, posted by, links', () =
   });
 
   it('shows the job title, or "—"', async () => {
-    expect(cell(await rowOf('501'), 'job')).toBe('Revenue Operations Manager');
-    expect(cell(await rowOf('401'), 'job')).toBe('Principal System &amp; App Admin');
-    expect(cell(await rowOf('101'), 'job')).toBe('<span class="muted">—</span>');
+    // The Job cell without its relevance badges.
+    const title = (row: string) => cell(row, 'job').replace(/<div class="badges"[\s\S]*<\/div>$/, '');
+    expect(title(await rowOf('501'))).toBe('Revenue Operations Manager');
+    expect(title(await rowOf('401'))).toBe('Principal System &amp; App Admin');
+    expect(title(await rowOf('101'))).toBe('<span class="muted">—</span>');
   });
 
   it('shows the company, linked to its LinkedIn page when known, or "—"', async () => {
@@ -609,5 +615,97 @@ describe('GET /api/posts', () => {
     expect(json.posts[0]!.tagged_companies).toEqual([
       { id: '20000001', name: 'Example Data Co', linkedin_url: 'https://www.linkedin.com/company/example-data-co/' },
     ]);
+  });
+});
+
+describe('GET / and /api/posts — relevance views', () => {
+  /** Re-labels fixture posts by activity id ("501" → li:7500000000000000501). */
+  async function relabel(id: string, relevance: string, persona = 'none', evidence: string | null = 'Example Role', reason = 'Example reason') {
+    await env.DB.prepare(
+      `UPDATE post_classifications SET relevance = ?, persona = ?, evidence_text = ?, reason = ?
+       WHERE post_id = (SELECT id FROM raw_posts WHERE source_id = ?)`,
+    )
+      .bind(relevance, persona, evidence, reason, `li:7500000000000000${id}`)
+      .run();
+  }
+  const tbody = (body: string) => body.slice(body.indexOf('<tbody>'), body.indexOf('</tbody>'));
+  const listedIds = (body: string) => [...tbody(body).matchAll(/activity-7500000000000000(\d{3})-/g)].map((m) => m[1]);
+  const tabs = (body: string) => body.slice(body.indexOf('<nav class="view-tabs"'), body.indexOf('</nav>', body.indexOf('<nav class="view-tabs"')));
+
+  beforeEach(async () => {
+    await relabel('101', 'needs_review', 'sales_operations', 'join our Sales Operations team', 'Supporting technical role in Sales Operations');
+    await relabel('201', 'unrelated');
+  });
+
+  it('lists only relevant posts by default, with tab counts from the label counter table', async () => {
+    const body = await (await get('/')).text();
+    expect(listedIds(body).sort()).toEqual(['301', '401', '501', '601']);
+    expect(body).toContain('Showing 1–4 of 4 posts');
+    expect(tabs(body)).toContain('<a href="/" aria-current="page">Relevant<span class="num">4</span></a>');
+    expect(tabs(body)).toContain('<a href="/?relevance=needs_review">Needs review<span class="num">1</span></a>');
+    expect(tabs(body)).toContain('<a href="/?relevance=all">All<span class="num">6</span></a>');
+    // Relevant posts carry their persona only.
+    expect(tbody(body)).toContain('<span class="badge persona sales_operations">Sales Ops</span>');
+    expect(tbody(body)).not.toContain('badge relevance');
+  });
+
+  it('shows the Needs review view with its label, persona, reason and evidence, and keeps the view in links and the filter form', async () => {
+    const body = await (await get('/?relevance=needs_review')).text();
+    expect(listedIds(body)).toEqual(['101']);
+    expect(body).toContain('Showing 1–1 of 1 posts');
+    expect(tabs(body)).toContain('aria-current="page">Needs review');
+    expect(tbody(body)).toContain(
+      '<div class="badges" title="Supporting technical role in Sales Operations — “join our Sales Operations team”"><span class="badge persona sales_operations">Sales Ops</span><span class="badge relevance needs_review">Needs review</span></div>',
+    );
+    expect(body).toContain('<input type="hidden" name="relevance" value="needs_review">');
+    expect(tabs(body)).toContain('href="/?relevance=all"');
+    // Other filters keep the view and are kept by the tabs.
+    const filtered = await (await get('/?relevance=needs_review&work_mode=remote')).text();
+    expect(tabs(filtered)).toContain('href="/?relevance=all&amp;work_mode=remote"');
+  });
+
+  it('lists every post in the All view, with unrelated and unclassified posts labeled', async () => {
+    await env.DB.prepare(`DELETE FROM post_classifications WHERE post_id = (SELECT id FROM raw_posts WHERE source_id = 'li:7500000000000000601')`).run();
+    const body = await (await get('/?relevance=all')).text();
+    expect(listedIds(body).sort()).toEqual(['101', '201', '301', '401', '501', '601']);
+    expect(body).toContain('Showing 1–6 of 6 posts');
+    expect(tbody(body)).toContain('<span class="badge relevance unrelated">Unrelated</span>');
+    expect(tbody(body)).toContain('<span class="badge relevance unclassified" title="Stored before relevance classification">Unclassified</span>');
+    // Unclassified posts never appear in a relevance view.
+    expect(listedIds(await (await get('/')).text())).not.toContain('601');
+  });
+
+  it('escapes the reason and evidence in the badge tooltip', async () => {
+    await relabel('101', 'needs_review', 'none', '<script>alert(1)</script>', 'Adjacent "title"');
+    const body = await (await get('/?relevance=needs_review')).text();
+    expect(body).not.toContain('<script>alert(1)</script>');
+    expect(body).toContain('title="Adjacent &quot;title&quot; — “&lt;script&gt;alert(1)&lt;/script&gt;”"');
+  });
+
+  it('explains an empty Relevant view when other posts are stored, and ignores unknown view values', async () => {
+    for (const id of ['301', '401', '501', '601']) await relabel(id, 'unrelated');
+    const body = await (await get('/')).text();
+    expect(body).toContain('No relevant posts yet. Check Needs review or All for the other stored posts.');
+    expect(body).not.toContain('No US hiring posts stored yet');
+    expect(await (await get('/?relevance=bogus')).text()).toContain('No relevant posts yet.');
+  });
+
+  it('returns every post with its classification from /api/posts by default, and filters by relevance', async () => {
+    const all = (await (await get('/api/posts')).json()) as { relevance: string; posts: Record<string, unknown>[] };
+    expect(all.relevance).toBe('all');
+    expect(all.posts).toHaveLength(6);
+    const review = all.posts.find((p) => p.source_id === 'li:7500000000000000101')!;
+    expect(review).toMatchObject({
+      relevance: 'needs_review',
+      persona: 'sales_operations',
+      hiring_intent: 'strong',
+      evidence_text: 'join our Sales Operations team',
+      relevance_reason: 'Supporting technical role in Sales Operations',
+    });
+    const relevant = (await (await get('/api/posts?relevance=relevant')).json()) as { relevance: string; posts: Record<string, unknown>[] };
+    expect(relevant.relevance).toBe('relevant');
+    expect(relevant.posts.map((p) => p.relevance)).toEqual(['relevant', 'relevant', 'relevant', 'relevant']);
+    const unrelated = (await (await get('/api/posts?relevance=unrelated')).json()) as { posts: Record<string, unknown>[] };
+    expect(unrelated.posts.map((p) => p.source_id)).toEqual(['li:7500000000000000201']);
   });
 });

@@ -1,11 +1,12 @@
 import { html } from 'hono/html';
+import type { Persona, Relevance, RelevanceView } from '../domain/classification';
 import type { IngestRun } from '../domain/ingest-run';
-import type { StoredRawPost, WorkMode } from '../domain/raw-post';
+import type { WorkMode } from '../domain/raw-post';
 import type { SearchWindow } from '../domain/search-run';
 import { formatInZone } from '../lib/time';
 import { canonicalLinkedinJobUrl } from '../normalization/job-links';
 import type { SearchFormState, SearchMessage } from '../routes/run-search';
-import type { PostFilters, QueryCount } from '../storage/posts.repository';
+import type { ListedPost, PostFilters, QueryCount } from '../storage/posts.repository';
 import { externalLink, icon, layout, statCard, type Html, type IconName, type Tone } from './layout';
 import { postSnippet } from './post-snippet';
 import { RUN_COUNTERS } from './run-counters';
@@ -89,9 +90,13 @@ export interface DashboardViewModel {
   /** Post counts of the production search queries (SEARCH_QUERIES), in order; 0 when none are stored. */
   perQuery: QueryCount[];
   filters: PostFilters;
+  /** Which posts the table lists: one relevance label (default "relevant") or all. */
+  view: RelevanceView;
+  /** Posts per relevance label (trigger-maintained, no scan). */
+  relevanceCounts: Record<Relevance, number>;
   /** Set when an author/text search was limited to recent posts because no "from" date was given. */
   searchWindowFrom: string | null;
-  posts: StoredRawPost[];
+  posts: ListedPost[];
   page: number;
   pageSize: number;
   hasMore: boolean;
@@ -120,7 +125,36 @@ const shortLocation = (text: string) => text.replace(/,\s*(?:united states(?: of
 
 const NONE = html`<span class="muted">—</span>`;
 
-function postRow(post: StoredRawPost, timeZone: string): Html {
+/** Table views, in tab order. */
+const VIEW_TABS: ReadonlyArray<{ view: RelevanceView; label: string }> = [
+  { view: 'relevant', label: 'Relevant' },
+  { view: 'needs_review', label: 'Needs review' },
+  { view: 'all', label: 'All' },
+];
+const PERSONA_LABELS: Record<Exclude<Persona, 'none'>, string> = {
+  revenue_operations: 'RevOps',
+  sales_operations: 'Sales Ops',
+  vendor_manager: 'Vendor Mgmt',
+};
+const RELEVANCE_LABELS: Record<Exclude<Relevance, 'relevant'>, string> = {
+  needs_review: 'Needs review',
+  unrelated: 'Unrelated',
+  not_a_job: 'Not a job',
+};
+
+/** The target function and, for anything but a relevant post, its label; the tooltip gives the reason and evidence. */
+function relevanceBadges(post: ListedPost): Html | '' {
+  if (!post.relevance) return html`<div class="badges"><span class="badge relevance unclassified" title="Stored before relevance classification">Unclassified</span></div>`;
+  const tip = post.evidence_text ? `${post.relevance_reason} — “${post.evidence_text}”` : (post.relevance_reason ?? '');
+  const persona = post.persona && post.persona !== 'none' ? PERSONA_LABELS[post.persona] : null;
+  const label = post.relevance === 'relevant' ? null : RELEVANCE_LABELS[post.relevance];
+  if (!persona && !label) return '';
+  return html`<div class="badges" title="${tip}">${persona ? html`<span class="badge persona ${post.persona}">${persona}</span>` : ''}${label
+    ? html`<span class="badge relevance ${post.relevance}">${label}</span>`
+    : ''}</div>`;
+}
+
+function postRow(post: ListedPost, timeZone: string): Html {
   const text = post.text ?? '';
   const snippet = postSnippet(text);
   const author = post.author_name ?? 'Unknown';
@@ -136,7 +170,7 @@ function postRow(post: StoredRawPost, timeZone: string): Html {
   ].filter((link) => link !== null);
   return html`<tr>
     <td class="when" data-label="Posted">${formatInZone(post.posted_at, timeZone)}</td>
-    <td class="job" data-label="Job">${post.job_title ?? NONE}</td>
+    <td class="job" data-label="Job">${post.job_title ?? NONE}${relevanceBadges(post)}</td>
     <td class="company" data-label="Company">${post.company_name
       ? post.company_linkedin_url
         ? externalLink(post.company_linkedin_url, post.company_name, 'company-name')
@@ -198,10 +232,22 @@ function runSearchCard(vm: RunSearchViewModel, timeZone: string): Html {
     </section>`;
 }
 
-const isFiltered = (filters: PostFilters) => Object.values(filters).some((value) => value !== undefined && value !== '');
+/** Any filter besides the relevance view (which the tabs show). */
+const isFiltered = (filters: PostFilters) =>
+  Object.entries(filters).some(([key, value]) => key !== 'relevance' && value !== undefined && value !== '');
 
-export function pageHref(filters: PostFilters, page: number): string {
+function emptyMessage(vm: DashboardViewModel): string {
+  if (isFiltered(vm.filters) || vm.page > 1) return 'No posts match these filters.';
+  if (vm.totalPosts === 0) return 'No US hiring posts stored yet. Run a search to discover opportunities.';
+  if (vm.view === 'relevant') return 'No relevant posts yet. Check Needs review or All for the other stored posts.';
+  if (vm.view === 'needs_review') return 'No posts need review.';
+  return 'No posts match these filters.';
+}
+
+/** The dashboard URL for these filters, page and view ("relevant" is the default and needs no parameter). */
+export function pageHref(filters: PostFilters, page: number, view: RelevanceView = 'relevant'): string {
   const params = new URLSearchParams();
+  if (view !== 'relevant') params.set('relevance', view);
   if (filters.query) params.set('query', filters.query);
   if (filters.company) params.set('company', filters.company);
   if (filters.workMode) params.set('work_mode', filters.workMode);
@@ -226,7 +272,7 @@ export function dashboardPage(vm: DashboardViewModel): Html {
     active: 'posts',
     timeZone: vm.timeZone,
     // While a search is in flight, reload (without the one-time message) until its results are stored.
-    refreshUrl: vm.runSearch.inFlight ? pageHref(vm.filters, vm.page) : undefined,
+    refreshUrl: vm.runSearch.inFlight ? pageHref(vm.filters, vm.page, vm.view) : undefined,
     script: RUN_SEARCH_SCRIPT,
     body: html`
     <div class="page-head">
@@ -278,6 +324,7 @@ export function dashboardPage(vm: DashboardViewModel): Html {
     <section class="card filter-card" aria-labelledby="filter-title">
       <h2 class="sr-only" id="filter-title">Filter posts</h2>
       <form class="filters" method="get" action="/">
+        ${vm.view !== 'relevant' ? html`<input type="hidden" name="relevance" value="${vm.view}">` : ''}
         <label class="field f-query">Search query
           <select name="query">
             <option value="">All queries</option>
@@ -316,6 +363,11 @@ export function dashboardPage(vm: DashboardViewModel): Html {
     <section class="card table-card">
       <div class="table-head">
         <h2>Posts</h2>
+        <nav class="view-tabs" aria-label="Show posts">${VIEW_TABS.map(
+          (tab) => html`<a href="${pageHref(vm.filters, 1, tab.view)}"${tab.view === vm.view ? html` aria-current="page"` : ''}>${tab.label}<span class="num">${tab.view === 'all'
+            ? vm.totalPosts
+            : vm.relevanceCounts[tab.view]}</span></a>`,
+        )}</nav>
         <p class="results">${vm.posts.length
           ? `Showing ${first}–${last}${vm.matching !== null ? ` of ${vm.matching}` : ''} posts, newest first`
           : ''}</p>
@@ -329,14 +381,12 @@ export function dashboardPage(vm: DashboardViewModel): Html {
             <thead><tr><th>Posted</th><th>Job</th><th>Company</th><th>Location</th><th>Posted by</th><th>Post</th><th>Links</th></tr></thead>
             <tbody>${vm.posts.map((post) => postRow(post, vm.timeZone))}</tbody>
           </table></div>`
-        : html`<div class="empty">${icon('inbox', 28)}<p>${isFiltered(vm.filters) || vm.page > 1
-            ? 'No posts match these filters.'
-            : 'No US hiring posts stored yet. Run a search to discover opportunities.'}</p></div>`}
+        : html`<div class="empty">${icon('inbox', 28)}<p>${emptyMessage(vm)}</p></div>`}
     </section>
     ${vm.posts.length && (vm.page > 1 || vm.hasMore)
       ? html`<nav class="pager" aria-label="Pages">
-          ${vm.page > 1 ? html`<a class="btn btn-secondary" href="${pageHref(vm.filters, vm.page - 1)}">← Newer</a>` : ''}
-          ${vm.hasMore ? html`<a class="btn btn-secondary" href="${pageHref(vm.filters, vm.page + 1)}">Older →</a>` : ''}
+          ${vm.page > 1 ? html`<a class="btn btn-secondary" href="${pageHref(vm.filters, vm.page - 1, vm.view)}">← Newer</a>` : ''}
+          ${vm.hasMore ? html`<a class="btn btn-secondary" href="${pageHref(vm.filters, vm.page + 1, vm.view)}">Older →</a>` : ''}
         </nav>`
       : ''}
     `,

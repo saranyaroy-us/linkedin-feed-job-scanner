@@ -1,3 +1,4 @@
+import type { PostClassificationFields, Relevance } from '../domain/classification';
 import type { RawPost, StoredRawPost, StoredRawPostWithRaw, WorkMode } from '../domain/raw-post';
 import { endOfDayUtc, startOfDayUtc } from '../lib/time';
 
@@ -18,7 +19,12 @@ export interface PostFilters {
   to?: string;
   /** Case-insensitive substring of text, author headline or article title. */
   text?: string;
+  /** Only posts with this relevance label (unset: every post, classified or not). */
+  relevance?: Relevance;
 }
+
+/** A post as listed by the dashboard and API: its columns (raw_json only on request) plus its classification. */
+export type ListedPost = StoredRawPost & PostClassificationFields & { raw_json?: string | null };
 
 export interface SearchOptions {
   limit: number;
@@ -52,6 +58,7 @@ const POST_COLUMNS = [
   'article_title',
   'article_url',
   'job_title',
+  'job_title_source',
   'company_name',
   'company_linkedin_url',
   'work_mode',
@@ -68,7 +75,9 @@ const POST_COLUMNS = [
   'raw_json',
 ] as const satisfies readonly (keyof RawPost)[];
 
-const READ_COLUMNS = ['id', ...POST_COLUMNS.filter((c) => c !== 'raw_json'), 'created_at'].join(', ');
+const READ_COLUMNS = ['id', ...POST_COLUMNS.filter((c) => c !== 'raw_json'), 'created_at'].map((c) => `p.${c}`).join(', ');
+/** The post's classification (all NULL when it has none yet). */
+const CLASSIFICATION_COLUMNS = 'c.relevance, c.persona, c.hiring_intent, c.evidence_text, c.reason AS relevance_reason';
 
 /**
  * Posts are inserted as one JSON array per statement, unpacked with json_each:
@@ -197,12 +206,14 @@ export class PostsRepository {
    * D1 rows-read stays close to the page size.
    * Only posts that passed the US-job filter (job_country 'US') are listed, so
    * older or unclassified rows can never appear in the dashboard or the API.
+   * Each post comes with its relevance classification (NULLs until it has one);
+   * the relevance filter looks posts up through idx_post_classifications_relevance.
    */
   async search(
     filters: PostFilters,
     options: SearchOptions,
-  ): Promise<{ posts: (StoredRawPost & { raw_json?: string | null })[]; hasMore: boolean }> {
-    const where: string[] = ["job_country = 'US'"];
+  ): Promise<{ posts: ListedPost[]; hasMore: boolean }> {
+    const where: string[] = ["p.job_country = 'US'"];
     const params: (string | number)[] = [];
 
     if (filters.query) {
@@ -237,17 +248,21 @@ export class PostsRepository {
       where.push(`(${contains('text')} OR ${contains('author_headline')} OR ${contains('article_title')})`);
       params.push(filters.text, filters.text, filters.text);
     }
+    if (filters.relevance) {
+      where.push('c.relevance = ?');
+      params.push(filters.relevance);
+    }
 
-    const columns = options.includeRawJson ? `${READ_COLUMNS}, raw_json` : READ_COLUMNS;
+    const columns = `${READ_COLUMNS}, ${CLASSIFICATION_COLUMNS}${options.includeRawJson ? ', p.raw_json' : ''}`;
     const whereSql = `WHERE ${where.join(' AND ')}`;
     const { results } = await this.db
       .prepare(
-        `SELECT ${columns} FROM raw_posts ${whereSql}
-         ORDER BY posted_at DESC, id DESC
+        `SELECT ${columns} FROM raw_posts AS p LEFT JOIN post_classifications AS c ON c.post_id = p.id ${whereSql}
+         ORDER BY p.posted_at DESC, p.id DESC
          LIMIT ? OFFSET ?`,
       )
       .bind(...params, options.limit + 1, options.offset)
-      .all<StoredRawPost & { raw_json?: string | null }>();
+      .all<ListedPost>();
 
     return { posts: results.slice(0, options.limit), hasMore: results.length > options.limit };
   }

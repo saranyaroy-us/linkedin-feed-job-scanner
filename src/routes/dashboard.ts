@@ -4,18 +4,27 @@ import type { AppEnv } from '../config/env';
 import { SEARCH_QUERIES } from '../config/search-config';
 import { dateInZone, resolveTimeZone, startOfDayUtc } from '../lib/time';
 import { findSearchInFlight } from '../search/manual-search';
+import { ClassificationsRepository } from '../storage/classifications.repository';
 import { IngestRunsRepository } from '../storage/ingest-runs.repository';
 import { PostsRepository } from '../storage/posts.repository';
 import type { SearchRunWithIngest } from '../storage/search-runs.repository';
 import { dashboardPage, type RunSearchViewModel } from '../views/dashboard';
 import { rangeDays, searchWindowLabel } from '../views/search-window';
-import { hasNoFilters, hasOnlyQueryFilter, parseFilters, parseIntParam, withSearchWindow } from './filters';
+import {
+  hasNoFilters,
+  hasOnlyQueryFilter,
+  parseFilters,
+  parseIntParam,
+  parseRelevanceView,
+  withRelevance,
+  withSearchWindow,
+} from './filters';
 import { parseSearchFormState } from './run-search';
 
 export const DASHBOARD_PAGE_SIZE = 50;
 const MAX_PAGE = 200;
 
-/** GET / — Run Search, stats, posts per query and the filtered posts table. */
+/** GET / — Run Search, stats, posts per query and the filtered posts table (Relevant posts by default). */
 export function dashboardHandler(options: { fetch?: FetchLike; now?: () => Date } = {}) {
   return async (c: Context<AppEnv>) => {
     const timeZone = resolveTimeZone(c.env.DISPLAY_TIMEZONE);
@@ -23,23 +32,31 @@ export function dashboardHandler(options: { fetch?: FetchLike; now?: () => Date 
     const filters = parseFilters(c.req.query());
     const { filters: effective, windowFrom } = withSearchWindow(filters, now, timeZone);
     const page = parseIntParam(c.req.query('page'), 1, MAX_PAGE, 1);
+    const view = parseRelevanceView(c.req.query('relevance'), 'relevant');
 
     const posts = new PostsRepository(c.env.DB);
     const runs = new IngestRunsRepository(c.env.DB);
     const apify = c.env.APIFY_TOKEN ? createApifyClient(c.env.APIFY_TOKEN, options.fetch) : null;
 
-    const [perQuery, addedToday, latestRun, result, inFlight] = await Promise.all([
+    const [perQuery, addedToday, latestRun, result, inFlight, relevanceCounts] = await Promise.all([
       posts.queryCounts(),
       posts.countCreatedSince(startOfDayUtc(dateInZone(now, timeZone), timeZone)),
       runs.latestScreened(),
-      posts.search(effective, { limit: DASHBOARD_PAGE_SIZE, offset: (page - 1) * DASHBOARD_PAGE_SIZE, timeZone }),
+      posts.search(withRelevance(effective, view), { limit: DASHBOARD_PAGE_SIZE, offset: (page - 1) * DASHBOARD_PAGE_SIZE, timeZone }),
       findSearchInFlight({ db: c.env.DB, apify, now: options.now }),
+      new ClassificationsRepository(c.env.DB).counts(),
     ]);
 
     // Totals cover every stored post; the query filter and card list only the dashboard's queries.
     const countFor = (query: string | undefined) => perQuery.find((row) => row.search_query === query)?.posts ?? 0;
     const totalPosts = perQuery.reduce((sum, row) => sum + row.posts, 0);
-    const matching = hasNoFilters(filters) ? totalPosts : hasOnlyQueryFilter(filters) ? countFor(filters.query) : null;
+    // Exact totals come from counter tables: per label for a relevance view, per query for "All".
+    const viewTotal = view === 'all' ? totalPosts : relevanceCounts[view];
+    const matching = hasNoFilters(filters)
+      ? viewTotal
+      : view === 'all' && hasOnlyQueryFilter(filters)
+        ? countFor(filters.query)
+        : null;
 
     return c.html(
       dashboardPage({
@@ -49,6 +66,8 @@ export function dashboardHandler(options: { fetch?: FetchLike; now?: () => Date 
         latestRun,
         perQuery: SEARCH_QUERIES.map((query) => ({ search_query: query, posts: countFor(query) })),
         filters,
+        view,
+        relevanceCounts,
         searchWindowFrom: windowFrom,
         posts: result.posts,
         page,
