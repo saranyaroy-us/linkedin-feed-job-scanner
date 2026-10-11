@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jobLocation } from '../../src/ingestion/job-location';
+import { classifyLocationText, jobLocation } from '../../src/ingestion/job-location';
 import { sampleItem } from '../helpers';
 
 const post = (content: string, extra: Record<string, unknown> = {}) => ({ id: '7500000000000000999', content, ...extra });
@@ -283,5 +283,30 @@ describe('jobLocation — free text says more than where the job is (regression)
     const listing = { title: 'RevOps Lead - supporting U.S. clients', link: 'https://jobs.lever.co/acme/1' };
     expect(jobLocation(post('We are hiring', { article: listing }))).toEqual(UNKNOWN);
     expect(jobLocation(post('We are hiring', { job: { location: 'United States (Remote)' } }))).toMatchObject({ verdict: 'us', source: 'job' });
+  });
+});
+
+describe('classifyLocationText — the CPU-optimized scans keep every result (regression)', () => {
+  const verdict = (text: string) => classifyLocationText(text).verdict;
+
+  it('ignores emails and links whatever whitespace or punctuation surrounds them', () => {
+    expect(verdict('Hiring – Austin, TX.\u00a0CV to jobs@acme.co.uk')).toBe('us');
+    expect(verdict('Remote role.\u3000Details: www.acme-london.com')).toBe('unknown');
+    expect(verdict('Hiring (details: lnkd.in/abc.uk) in Denver, CO')).toBe('us');
+    expect(verdict('Hiring in Denver, CO\u2028Email:ops@acme-london.co.uk')).toBe('us');
+    expect(verdict('Apply at https://jobs.example.com/job/us/123 or acme.in/careers')).toBe('unknown');
+  });
+
+  it('folds accents, combining marks and styled letters before matching places', () => {
+    expect(verdict('Hiring in Zu\u0308rich')).toBe('non_us');
+    expect(verdict('Hiring in Sa\u0303o Paulo')).toBe('non_us');
+    expect(verdict('𝗛𝗶𝗿𝗶𝗻𝗴 in 𝗔𝘂𝘀𝘁𝗶𝗻, 𝗧𝗫 🚀')).toBe('us');
+  });
+
+  it('still finds US-remote wording in every form, and nothing in words that merely contain "us"', () => {
+    for (const text of ['Role: usremote', 'Role: remoteus', 'Remote-US only', 'Location: Remote / US', 'Open to US citizens', '(US) Remote']) {
+      expect(verdict(text)).toBe('us');
+    }
+    expect(verdict('Focus on business users; join us to use our tools')).toBe('unknown');
   });
 });

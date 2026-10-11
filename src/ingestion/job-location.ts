@@ -42,16 +42,78 @@ export interface JobLocation {
 const UNKNOWN: JobLocation = { verdict: 'unknown', text: null, source: null };
 const MAX_PHRASE_WORDS = 4;
 
+/*
+ * CPU note: in production most of a page's CPU went to regex scans over whole posts (Workers runs these
+ * regexes far slower than a warm local V8). The helpers below give exactly the same results as the plain
+ * regex versions, but scan only where a match is possible: plain substring checks first, whitespace-free
+ * chunks for patterns that cannot match across whitespace, and character loops with an ASCII fast path.
+ */
+
+/** ECMAScript `\s`: WhiteSpace and LineTerminator code points. */
+const isSpace = (c: number) =>
+  c === 32 || (c >= 9 && c <= 13) || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a) ||
+  c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff;
+/** ASCII `\w`, what `\b` means in a regex without the `u` flag. */
+const isAsciiWord = (c: number) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
+
+/** Per-code-point Unicode property test, cached (posts reuse the same few emoji and punctuation marks). */
+function propertyTest(re: RegExp): (cp: number) => boolean {
+  const cache = new Map<number, boolean>();
+  return (cp) => {
+    let hit = cache.get(cp);
+    if (hit === undefined) cache.set(cp, (hit = re.test(String.fromCodePoint(cp))));
+    return hit;
+  };
+}
+const isMark = propertyTest(/\p{M}/u);
+const isLetterOrDigit = propertyTest(/[\p{L}\p{N}]/u);
+
+/** `text.replace(/\p{M}+/gu, '')`: every combining mark is at or above U+0300. */
+function stripMarks(text: string): string {
+  let out = '';
+  let copied = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) < 0x300) continue;
+    const cp = text.codePointAt(i)!;
+    const width = cp > 0xffff ? 2 : 1;
+    if (isMark(cp)) {
+      out += text.slice(copied, i);
+      copied = i + width;
+    }
+    i += width - 1;
+  }
+  return copied === 0 ? text : out + text.slice(copied);
+}
+
+/** `text.replace(re, replacement)` for a pattern that never matches across whitespace and always contains one of `markers`. */
+function replaceInChunks(text: string, markers: readonly string[], re: RegExp, replacement: string): string {
+  let out = '';
+  let copied = 0;
+  for (;;) {
+    let hit = -1;
+    for (const marker of markers) {
+      const at = text.indexOf(marker, copied);
+      if (at !== -1 && (hit === -1 || at < hit)) hit = at;
+    }
+    if (hit === -1) break;
+    let start = hit;
+    while (start > copied && !isSpace(text.charCodeAt(start - 1))) start--;
+    let end = hit;
+    while (end < text.length && !isSpace(text.charCodeAt(end))) end++;
+    out += text.slice(copied, start) + text.slice(start, end).replace(re, replacement);
+    copied = end;
+  }
+  return copied === 0 ? text : out + text.slice(copied);
+}
+
 /** Lowercase, accent-free, compatibility-folded text with U.S./U.K./D.C. collapsed into words. */
 function normalize(text: string): string {
-  return text
-    .normalize('NFKD')
-    .replace(/\p{M}+/gu, '')
-    .toLowerCase()
-    .replace(/\bu\.s\.a\b\.?/g, ' usa ')
-    .replace(/\bu\.s\b\.?/g, ' usa ')
-    .replace(/\bu\.k\b\.?/g, ' uk ')
-    .replace(/\bd\.c\b\.?/g, ' dc ');
+  let folded = stripMarks(text.normalize('NFKD')).toLowerCase();
+  if (folded.includes('u.s.a')) folded = folded.replace(/\bu\.s\.a\b\.?/g, ' usa ');
+  if (folded.includes('u.s')) folded = folded.replace(/\bu\.s\b\.?/g, ' usa ');
+  if (folded.includes('u.k')) folded = folded.replace(/\bu\.k\b\.?/g, ' uk ');
+  if (folded.includes('d.c')) folded = folded.replace(/\bd\.c\b\.?/g, ' dc ');
+  return folded;
 }
 
 const words = (normalized: string) => normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
@@ -85,13 +147,21 @@ const ANECDOTE = new RegExp(
   'gu',
 );
 
+/** Substrings every match of these patterns contains: without one, the pattern cannot match. */
+const TRAVEL_HINTS = ['travel', 'trip', 'visit', 'commut'];
+const HEADQUARTERS_HINTS = ['hq', 'head'];
+const ANECDOTE_HINTS = ['as a', 'based', 'living', 'located', 'settled', 'staying', 'live', 'moved', 'relocated', 'grew', 'born', 'raised'];
+const hasAny = (text: string, hints: readonly string[]) => hints.some((hint) => text.includes(hint));
+
 /** Free text with links, emails, travel, headquarters and the author's story replaced by a separator. */
 function prepareFreeText(text: string): string {
-  const withoutEmails = text.includes('@') ? text.replace(EMAIL, ' | ') : text;
-  return normalize(withoutEmails.replace(LINK, ' | '))
-    .replace(TRAVEL, ' | ')
-    .replace(HEADQUARTERS, ' | ')
-    .replace(ANECDOTE, ' | ');
+  // Emails and links never contain whitespace; every link contains "." or ":" ("www.", "https://", "acme.com").
+  const withoutLinks = replaceInChunks(replaceInChunks(text, ['@'], EMAIL, ' | '), ['.', ':'], LINK, ' | ');
+  let prepared = normalize(withoutLinks);
+  if (hasAny(prepared, TRAVEL_HINTS)) prepared = prepared.replace(TRAVEL, ' | ');
+  if (hasAny(prepared, HEADQUARTERS_HINTS)) prepared = prepared.replace(HEADQUARTERS, ' | ');
+  if (hasAny(prepared, ANECDOTE_HINTS)) prepared = prepared.replace(ANECDOTE, ' | ');
+  return prepared;
 }
 
 /* ---------- Context of a match ---------- */
@@ -102,11 +172,28 @@ interface Token {
   end: number;
 }
 
-const WORD = /[\p{L}\p{N}]+/gu;
+/** The runs of `/[\p{L}\p{N}]+/gu`, by code point, with ASCII letters and digits decided without a regex. */
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
-  WORD.lastIndex = 0;
-  for (let m = WORD.exec(text); m; m = WORD.exec(text)) tokens.push({ word: m[0], start: m.index, end: m.index + m[0].length });
+  let start = -1;
+  for (let i = 0; i < text.length; ) {
+    const c = text.charCodeAt(i);
+    let width = 1;
+    let wordChar: boolean;
+    if (c < 128) wordChar = (c >= 48 && c <= 57) || (c >= 97 && c <= 122) || (c >= 65 && c <= 90);
+    else {
+      const cp = text.codePointAt(i)!;
+      width = cp > 0xffff ? 2 : 1;
+      wordChar = isLetterOrDigit(cp);
+    }
+    if (wordChar && start === -1) start = i;
+    else if (!wordChar && start !== -1) {
+      tokens.push({ word: text.slice(start, i), start, end: i });
+      start = -1;
+    }
+    i += width;
+  }
+  if (start !== -1) tokens.push({ word: text.slice(start), start, end: text.length });
   return tokens;
 }
 
@@ -244,6 +331,19 @@ const NON_US_CITY_NAMES = new Set(NON_US_PLACES);
 const US_REMOTE =
   /\bus[\s-]*remote\b|\bremote[\s,:;|/()\-–—]*us\b|\(\s*us\s*\)|\bus[\s-]+(?:based|only)\b|\b(?:in|within|across|throughout) the us\b|\bus citizens?\b/g;
 
+/**
+ * Whether US_REMOTE can match: every alternative has an "us" with a non-word character (or "remote") on each
+ * side, so words such as "use", "business" or "focus" are skipped without running the regex.
+ */
+function mayMatchUsRemote(text: string): boolean {
+  for (let i = text.indexOf('us'); i !== -1; i = text.indexOf('us', i + 1)) {
+    const before = i === 0 || !isAsciiWord(text.charCodeAt(i - 1)) || text.endsWith('remote', i);
+    const after = i + 2 >= text.length || !isAsciiWord(text.charCodeAt(i + 2)) || text.startsWith('remote', i + 2);
+    if (before && after) return true;
+  }
+  return false;
+}
+
 /** "City, ST" — LinkedIn's format for US job locations. Only trusted in the structured field. */
 const STRUCTURED_CITY_STATE = /^[^,]+,\s*([a-z]{2})\s*(?:\(|,|$)/;
 
@@ -308,7 +408,7 @@ function evidence(text: string, structured: boolean): Evidence {
     }
   }
 
-  for (const match of prepared.matchAll(US_REMOTE)) {
+  for (const match of mayMatchUsRemote(prepared) ? prepared.matchAll(US_REMOTE) : []) {
     const { first, last } = context.tokensIn(match.index, match.index + match[0].length);
     if (structured || !context.incidental(first, last)) us.push('United States');
   }
